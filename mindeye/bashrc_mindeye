@@ -17,6 +17,5 @@ FSLDIR=/opt/fsl
 PATH=${FSLDIR}/bin:${PATH}
 export FSLDIR PATH
 export LD_LIBRARY_PATH=${FSLDIR}/lib:${FSLDIR}/fslpython/lib:${LD_LIBRARY_PATH}
-export PATH=${PATH}:/opt/ANTs-2.1.0-Linux/bin
-export PATH=${PATH}:${c3dpath}/bin
+
 conda activate rt_mindEye2
