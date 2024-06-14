@@ -26,14 +26,14 @@ The mindeye.py file contains all of the code that goes from the streamed raw NIf
     apptainer pull docker:brainiak/rtcloud:latest
     ```
     Alternatively, you could just get the .sif file created by the above pull from the hugging face data set described in set up step (6) below and place the rtcloud_latest.sif file in the directory instead of doing this apptainer pull command.
-3) On your local laptop/computer that you are going to display PsychoPy on, do the rt-cloud [local installation](https://github.com/brainiak/rt-cloud/tree/master?tab=readme-ov-file#local-installation) consisting of getting the rtcloud anaconda environment set up and cloning the rt-cloud repository on your local laptop/computer.
+3) On your local laptop/computer which you are going to display PsychoPy on, do the rt-cloud [local installation](https://github.com/brainiak/rt-cloud/tree/master?tab=readme-ov-file#local-installation) consisting of getting the rtcloud anaconda environment set up and cloning the rt-cloud repository on your local laptop/computer.
 4) Download the rt-cloud repository into your GPU-enabled computer like you did locally in (3).
 5) Download this mindeye projects folder from the rt-cloud-projects repository and place it in the projects folder of the rt-cloud repository both locally on the PsychoPy display computer and on the GPU-enabled computer.
-6) Download the hugging face dataset [here](https://huggingface.co/datasets/rkempner/rt-cloud-mindeye) into your GPU-enabled computer. In the mindeye.py script in this folder, set the path of data_and_model_storage_path to be where you place this hugging face dataset. 
-7) From this folder, get the bidsRun.py file and replace the bidsRun.py file within rt-cloud/rtCommon on your GPU-enabled computer with this new version of the bidsRun.py file.
-8) On the GPU-enabled computer, create a conda environment by downloading the rt_mindEye2.yml file from this repository then run: ```conda env create -f rt_mindEye2.yml```
-9) Copy the file called bashrc_mindeye.py from this folder to rt-cloud/ in the GPU-enabled computer.
-10) Copy the BidsDir from the huggingface repo into rt-cloud/projects/mindeye in the GPU-enabled computer.
+6) Download the hugging face dataset [here](https://huggingface.co/datasets/rkempner/rt-cloud-mindeye) into your GPU-enabled computer. In the mindeye.py script in this /mindeye/ folder, set the path of data_and_model_storage_path to be where you place this hugging face dataset. 
+7) From this /mindeye/ folder, get the bidsRun.py file and replace the bidsRun.py file within rt-cloud/rtCommon on your GPU-enabled computer with this new version of the bidsRun.py file set up particularly for this project.
+8) On the GPU-enabled computer, create a conda environment by downloading the rt_mindEye2.yml file from this /mindeye/ folder then run: ```conda env create -f rt_mindEye2.yml```
+9) Copy the file called bashrc_mindeye.py from this /mindeye/ folder to rt-cloud/ in the GPU-enabled computer.
+10) Copy the BidsDir from the hugging face dataset into rt-cloud/projects/mindeye in the GPU-enabled computer.
 
 **How to run**
 1) On the GPU-enabled computer,
