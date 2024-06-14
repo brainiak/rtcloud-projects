@@ -28,12 +28,13 @@ The mindeye.py file contains all of the code that goes from the streamed raw NIf
     Alternatively, you could just get the .sif file created by the above pull from the hugging face data set described in set up step (6) below and place the rtcloud_latest.sif file in the directory instead of doing this apptainer pull command.
 3) On your local laptop/computer which you are going to display PsychoPy on, do the rt-cloud [local installation](https://github.com/brainiak/rt-cloud/tree/master?tab=readme-ov-file#local-installation) consisting of getting the rtcloud anaconda environment set up and cloning the rt-cloud repository on your local laptop/computer.
 4) Download the rt-cloud repository into your GPU-enabled computer like you did locally in (3).
-5) Download this mindeye projects folder from the rt-cloud-projects repository and place it in the projects folder of the rt-cloud repository both locally on the PsychoPy display computer and on the GPU-enabled computer.
-6) Download the hugging face dataset [here](https://huggingface.co/datasets/rkempner/rt-cloud-mindeye) into your GPU-enabled computer. In the mindeye.py script in this /mindeye/ folder, set the path of data_and_model_storage_path to be where you place this hugging face dataset. 
-7) From this /mindeye/ folder, get the bidsRun.py file and replace the bidsRun.py file within rt-cloud/rtCommon on your GPU-enabled computer with this new version of the bidsRun.py file set up particularly for this project.
-8) On the GPU-enabled computer, create a conda environment by downloading the rt_mindEye2.yml file from this /mindeye/ folder then run: ```conda env create -f rt_mindEye2.yml```
-9) Copy the file called bashrc_mindeye.py from this /mindeye/ folder to rt-cloud/ in the GPU-enabled computer.
-10) Copy the BidsDir from the hugging face dataset into rt-cloud/projects/mindeye in the GPU-enabled computer.
+5) Download this /mindeye/ projects folder from the rt-cloud-projects repository and place it in the projects folder of the rt-cloud repository both locally on the PsychoPy display computer and on the GPU-enabled data analyzer computer.
+6) Change the absolute_path variable in the rt-cloud/projects/mindeye/psychopy_example/rtcloud_psychopy.py file on your PsychoPy display local computer to the absolute path location of your rt-cloud folder you set up locally in (3).
+7) Download the hugging face dataset [here](https://huggingface.co/datasets/rkempner/rt-cloud-mindeye) into your GPU-enabled computer. In the mindeye.py script in this /mindeye/ folder, set the path of data_and_model_storage_path to be where you place this hugging face dataset. 
+8) From this /mindeye/ folder, get the bidsRun.py file and replace the bidsRun.py file within rt-cloud/rtCommon on your GPU-enabled computer with this new version of the bidsRun.py file set up particularly for this project.
+9) On the GPU-enabled computer, create a conda environment by downloading the rt_mindEye2.yml file from this /mindeye/ folder then run: ```conda env create -f rt_mindEye2.yml```
+10) Copy the file called bashrc_mindeye.py from this /mindeye/ folder to rt-cloud/ in the GPU-enabled computer.
+11) Copy the BidsDir from the hugging face dataset into rt-cloud/projects/mindeye in the GPU-enabled computer.
 
 **How to run**
 1) On the GPU-enabled computer,
@@ -58,15 +59,15 @@ The mindeye.py file contains all of the code that goes from the streamed raw NIf
    ssh -L 8892:hostname:8898 [username]@[server-name]
    ```
    where hostname is the hostname of the GPU-enabled compute node. This is how we allow the data analyzer on the GPU-enabled computer on a server to send information to your local computer via the analysis listener which then becomes input for PsychoPy.
-4) In terminal locally, cd into rt-cloud directory from set up (3). Activate local rtcloud anaconda environment. Run the analysis listener start up:
+4) In terminal on your PsychoPy display computer locally, cd into rt-cloud directory from set up (3). Activate local rtcloud anaconda environment. Run the analysis listener start up:
    ```
    WEB_IP=localhost
    bash scripts/analysis_listener.sh -s $WEB_IP:8892  --test
    ```
 
-5) Open a new terminal. cd into the rt-cloud directory from set up (3) and then go to the following path: ```projects/mindeye/psychopy_example/```. Activate the rtcloud environment and run ```python rtcloud_psychopy.py```. This will open up the PsychoPy program which start waiting for incoming output from the data analyzer that reaches your computer through the analysis listener. Output coming in from real-time analysis of the fMRI data can then modify the stimuli given to your participant through the PsychoPy program. 
+5) Open a new terminal locally on your PsychoPy display computer. cd into the rt-cloud directory from set up (3) and then go to the following path: ```projects/mindeye/psychopy_example/```. Activate the rtcloud environment and run ```python rtcloud_psychopy.py```. This will open up the PsychoPy program which starts waiting for incoming output from the data analyzer that reaches your computer through the analysis listener. Output coming in from the real-time analysis of the fMRI data can then modify the stimuli given to your participant through the PsychoPy program. 
 
-6) On your local computer, open the webinterface by going to [http://localhost:8882/](http://localhost:8882/). Then enter "test" for both the username and password and press run. Files will populate the outDir in the rt-cloud directory via the analysis listener and the PsychoPy program will start displaying images once it receives the first image.
+6) On your local computer, open the webinterface by going to [http://localhost:8882/](http://localhost:8882/). Then enter "test" for both the username and password and press run. Files will populate the outDir in the local rt-cloud directory via the analysis listener and the PsychoPy program will start displaying images once it receives the first TR's information.
 
 **Example PsychoPy Visuals of Real-Time Visual Image Retrieval**
 
@@ -75,7 +76,8 @@ When you run the project server via the webinterface and run PsychoPy which is w
 ![Example PsychoPy Display Image:](https://github.com/brainiak/rtcloud-projects/blob/main/mindeye/example_psychopy.png)
 **Under Construction**
 
-1) Make a real-time pipeline with reconstructions in addition to retrievals (estimated completion time: 1 week).
-2) Create an easier set up procedure consisting of a single apptainer file with 
-   everything set up already (estimated completion time: 1 week).
-3) Create set up instructions for Mac and Windows (estimated completion time: 3 weeks).
+1) Make a real-time pipeline with reconstructions integrated into rtcloud in addition to retrievals (estimated completion time: 1 week). 
+2) Create an easier set up procedure consisting of a single apptainer file with everything set up already (estimated completion time: 1 week).
+3) Improve reconstruction/retrieval peformance by utilizing the enhanced image feature of the MindEye2 model (estimated completion time: 1 week).
+4) Improve reconstruction/retrieval performance by improving bold image preprocessing through slice time correction and other more sophisticated alignment methods (estimated completion time: 2 weeks).
+5) Create set up instructions for Mac and Windows (estimated completion time: 3 weeks).
