@@ -79,5 +79,5 @@ When you run the project server via the webinterface and run PsychoPy which is w
 1) Display reconstructions in (simulated) real-time (estimated completion time: 1 week). 
 2) Create an easier set up procedure consisting of a single apptainer file with everything set up already (estimated completion time: 1 week).
 3) Improve reconstruction/retrieval peformance by utilizing the enhanced image feature of the MindEye2 model (estimated completion time: 1 week).
-4) Improve reconstruction/retrieval performance by improving bold image preprocessing through slice time correction and other more sophisticated alignment methods (estimated completion time: 2 weeks).
+4) Improve reconstruction/retrieval performance by improving bold image preprocessing through slice time correction and more sophisticated alignment methods (estimated completion time: 2 weeks).
 5) Create set up instructions for Mac and Windows (estimated completion time: 3 weeks).
