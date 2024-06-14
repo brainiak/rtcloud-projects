@@ -70,7 +70,7 @@ The mindeye.py file contains all of the code that goes from the streamed raw NIf
 
 When you run the project server via the webinterface and run PsychoPy which is waiting for input via the analysis listener, you will get images like below where we can see the actual ground truth image shown to participants compared to the top 5 retrievals. The MindEye2 model's most likely candidate image is directly adjacent to the grouth truth image. The model is retrieving the most likely candidate images from the pool of images given in the 63 stimuli trials in the run.
 
-
+![Example PsychoPy Display Image:](https://github.com/brainiak/rtcloud-projects/blob/main/mindeye/example_psychopy.png)
 **Under Construction**
 
 1) Make a real-time pipeline with reconstructions in addition to retrievals.
