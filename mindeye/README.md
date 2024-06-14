@@ -76,7 +76,7 @@ When you run the project server via the webinterface and run PsychoPy which is w
 ![Example PsychoPy Display Image:](https://github.com/brainiak/rtcloud-projects/blob/main/mindeye/example_psychopy.png)
 **Under Construction**
 
-1) Make a real-time pipeline with reconstructions integrated into rtcloud in addition to retrievals (estimated completion time: 1 week). 
+1) Display reconstructions in (simulated) real-time (estimated completion time: 1 week). 
 2) Create an easier set up procedure consisting of a single apptainer file with everything set up already (estimated completion time: 1 week).
 3) Improve reconstruction/retrieval peformance by utilizing the enhanced image feature of the MindEye2 model (estimated completion time: 1 week).
 4) Improve reconstruction/retrieval performance by improving bold image preprocessing through slice time correction and other more sophisticated alignment methods (estimated completion time: 2 weeks).
