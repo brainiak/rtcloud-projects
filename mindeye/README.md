@@ -77,4 +77,4 @@ When you run the project server via the webinterface and run PsychoPy which is w
 1) Make a real-time pipeline with reconstructions in addition to retrievals (estimated completion time: 1 week).
 2) Create an easier set up procedure consisting of a single apptainer file with 
    everything set up already (estimated completion time: 1 week).
-3) Create set up instructions for Mac and Windows (estimated completion time: 2 weeks).
+3) Create set up instructions for Mac and Windows (estimated completion time: 3 weeks).
