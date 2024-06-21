@@ -23,7 +23,7 @@ The mindeye.py file contains all of the code that goes from the streamed raw NIf
 1) 80GB of GPU space and 128 GB of CPU space are required for the data analyzer computer. The set up currently is designed for linux 64-bit intel computers and we are working on instructions for Windows and Mac.
 2) On a GPU-enabled computer, go to the directory where you want to place the rt-cloud folder with this project inside it, and then download [apptainer](https://apptainer.org/). Next, pull the latest rtcloud docker image into an apptainer file: 
     ```
-    apptainer pull docker:brainiak/rtcloud:latest
+    apptainer pull docker://brainiak/rtcloud:latest
     ```
     Alternatively, you could get the .sif file, which the above command creates, from the hugging face data set described in set up step (6) below and place the rtcloud_latest.sif file in the directory instead of doing this apptainer pull command.
 3) On your local laptop/computer which you are going to display PsychoPy on, do the rt-cloud [local installation](https://github.com/brainiak/rt-cloud/tree/master?tab=readme-ov-file#local-installation) consisting of getting the rtcloud anaconda environment set up and cloning the rt-cloud repository on your local laptop/computer.
