@@ -1,9 +1,11 @@
+# drift correct, normalize, no slice time
+
 # set up main path where everything will be you should download the
 # hugging face directory described in readme and put it here on the same
 # server where the data analyzer is run so that the data analyzer code with 
 # the GPU can access these files
 # You should replace the below path with your location
-data_and_model_storage_path = '' # TODO REPLACE with the location of hugging face downloaded directory on GPU-enabled computer
+data_and_model_storage_path = '/scratch/gpfs/rk1593/rt_mindEye/rt_all_data/' # TODO REPLACE
 """-----------------------------------------------------------------------------
 Imports and set up for mindEye
 -----------------------------------------------------------------------------"""
@@ -196,7 +198,7 @@ if True:
 
     # Load pretrained model ckpt
     # Replace with pre_trained_fine_tuned_model.pth
-    tag='pretrained_fine-tuned.pth'
+    tag= 'pretrained_fine-tuned.pth'
     outdir = os.path.abspath(f'{data_and_model_storage_path}')
 
     # print(f"\n---loading {outdir}/{tag}.pth ckpt---\n")
@@ -313,7 +315,7 @@ day2_to_day1_mat =  f"{data_and_model_storage_path}day2ref_to_day1ref"
 def fast_apply_mask(target=None,mask=None):
     return target[np.where(mask == 1)].T
 lss_glm = FirstLevelModel(t_r=tr_length,slice_time_ref=0,hrf_model='glover',
-                        drift_model=None,high_pass=None,mask_img=mask_img,
+                        drift_model='polynomial',high_pass=None,mask_img=mask_img,
                         signal_scaling=False,smoothing_fwhm=None,noise_model='ar1',
                         n_jobs=-1,verbose=-1,memory_level=1,minimize_memory=True)
 day1_boldref_nibd = nib.load(day1_boldref)
@@ -351,8 +353,8 @@ def do_reconstructions(betas_tt):
                 reconsTR = samples.cpu()
             else:
                 reconsTR = torch.vstack((reconsTR, samples.cpu()))
-            imsize = 80
-            reconsTR = transforms.Resize((imsize,imsize))(reconsTR).float()
+            imsize = 50
+            reconsTR = transforms.Resize((imsize,imsize))(reconsTR).float().numpy().tolist()
         return reconsTR, clipvoxelsTR
     
 def batchwise_cosine_similarity(Z,B):
@@ -383,10 +385,10 @@ def get_top_retrievals(clipvoxel, all_images, stimulus_trial_counter):
         fwd_sim = batchwise_cosine_similarity(emb_,emb)  # brain, clip
         print("Given Brain embedding, find correct Image embedding")
     fwd_sim = np.array(fwd_sim.cpu())
-    imsize = 80
+    imsize = 50
     values_dict["ground_truth"] = transforms.Resize((imsize,imsize))(all_images[stimulus_trial_counter]).float().numpy().tolist()
    # values_dict["ground_truth"] = all_images[stimulus_trial_counter].numpy().tolist()
-    for attempt in range(5):
+    for attempt in range(1):
         which = np.flip(np.argsort(fwd_sim, axis = 0))[attempt]
        # values_dict[f"attempt{(attempt+1)}"] = all_images[which.copy()].numpy().tolist()
         values_dict[f"attempt{(attempt+1)}"] = transforms.Resize((imsize,imsize))(all_images[which.copy()]).float().numpy().tolist()
@@ -397,8 +399,6 @@ for run_num in range(1,2):
     print(f"==START OF DAY 2 RUN {run_num}!==\n")
     # stream in that data!
     data_stream = BidsInterface()
-    # NOTE: this will only work if BidsDir was taken from the hugging face repo and
-    #       placed in the mindeye folder in rt-cloud on data analyzer GPU-enabled computer
     streamID = data_stream.initBidsStream("projects/mindeye/BidsDir/", **{'datatype': 'func',
                                         'extension': '.nii.gz',
                                         'run': "01",
@@ -434,9 +434,13 @@ for run_num in range(1,2):
                                         timeout=999999,demoStep=1.6)
         image_data = incremental_bids_image.image
         current_label = tr_labels_hrf[TR]
+
+        
         if TR == 0:
             day2_run1_bold_ref = image_data
+            # make the day 2 bold ref
             nib.save(image_data, day2_boldref)
+            # save the transformation from the day 2 bold ref to the day 1 
             os.system(f"flirt -in {day2_boldref} \
             -ref {day1_boldref} \
             -omat {day2_to_day1_mat} \
@@ -462,6 +466,7 @@ for run_num in range(1,2):
         os.system(f"rm -r {mc}.mat") 
         imgs.append(get_data(mc_day1_aligned + ".nii.gz")) # only add to imgs list
         if tr_labels_hrf[TR] != tr_labels_hrf[TR + 1] and tr_labels_hrf[TR] != "blank":
+            # the current image is the last TR of a real image
             cropped_events = events_df[events_df.trial_number <= int(float(tr_labels_hrf[TR].split("_")[3]))]
             for i_trial, trial in cropped_events.iterrows():
                 cropped_events.loc[i_trial, "trial_type"] = "reference" if i_trial < (len(cropped_events) - 1) else "probe"
@@ -476,25 +481,30 @@ for run_num in range(1,2):
             beta_map = lss_glm.compute_contrast("probe", output_type="effect_size")
             beta_map_np = beta_map.get_fdata()
             beta_map_np = fast_apply_mask(target=beta_map_np,mask=mask_img.get_fdata())
+            beta_maps_list.append(beta_map_np)
+            index_for_norm = min(20, stimulus_trial_counter + 1)
+            beta_map_np = (beta_map_np - np.mean(np.vstack(beta_maps_list)[:index_for_norm,:], axis = 0)) / np.std(np.vstack(beta_maps_list)[:index_for_norm,:], axis = 0)
             beta_map_np = np.reshape(beta_map_np, (1,1,25225))
             betas_tt = torch.Tensor(beta_map_np).to("cpu")
             new_image_pt = torch.from_numpy(images[image_COCO_id])
             reconsTR, clipvoxelsTR = do_reconstructions(betas_tt)
             values_dict = get_top_retrievals(clipvoxelsTR, all_images=all_images, stimulus_trial_counter = stimulus_trial_counter)
-            
+            values_dict["recons"] = reconsTR
             # subjInterface.setResultDict allows us to send to the analysis listener immediately
             subjInterface.setResultDict(name=f'run{run_num}_TR{TR}',
                                         values=values_dict)
             stimulus_trial_counter += 1
         else:
             if tr_labels_hrf[TR] != "blank":
+                # this is the non-last TR of a real image
                 values_dict = {}
                 image_COCO_id = int(float(tr_labels_hrf[TR].split("_")[1])) - 1
-                imsize = 80
+                imsize = 50
                 values_dict["ground_truth"] = transforms.Resize((imsize,imsize))(all_images[stimulus_trial_counter]).float().numpy().tolist()
                 subjInterface.setResultDict(name=f'run{run_num}_TR{TR}',
                                             values=values_dict)
             else:
+                # blank TR
                 # when we are not at the end of a stimulus trial, send an empty dictionary to the analysis listener with "pass"
                 subjInterface.setResultDict(name=f'run{run_num}_TR{TR}',
                                 values={'pass': "pass"})
