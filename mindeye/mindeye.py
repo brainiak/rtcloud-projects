@@ -1,14 +1,14 @@
-# drift correct, normalize, no slice time
-
 # set up main path where everything will be you should download the
 # hugging face directory described in readme and put it here on the same
 # server where the data analyzer is run so that the data analyzer code with 
 # the GPU can access these files
 # You should replace the below path with your location
-data_and_model_storage_path = '/scratch/gpfs/rk1593/rt_mindEye/rt_all_data/' # TODO REPLACE
+data_and_model_storage_path = '/scratch/gpfs/ri4541/rt_mindEye/rt_all_data'
+rt_cloud_path = '/scratch/gpfs/ri4541/rt-cloud'
 """-----------------------------------------------------------------------------
 Imports and set up for mindEye
 -----------------------------------------------------------------------------"""
+
 if True:
     import os
     import sys
@@ -27,7 +27,7 @@ if True:
     from torchvision import transforms
     from accelerate import Accelerator, DeepSpeedPlugin
     # SDXL unCLIP requires code from https://github.com/Stability-AI/generative-models/tree/main
-    sys.path.append('generative_models/')
+    sys.path.append(f'{rt_cloud_path}/generative_models/')
     import sgm
     from generative_models.sgm.modules.encoders.modules import FrozenOpenCLIPImageEmbedder, FrozenOpenCLIPEmbedder2
     from generative_models.sgm.models.diffusion import DiffusionEngine
@@ -46,16 +46,18 @@ if True:
         local_rank = int(local_rank)
     accelerator = Accelerator(split_batches=False, mixed_precision="fp16")
     device = accelerator.device
-    cache_dir= f"{data_and_model_storage_path}cache"
+    cache_dir= f"{data_and_model_storage_path}/cache"
     model_name="multisubject_subj01_1024hid_nolow_300ep_milestone2"
     subj=1
     hidden_dim=1024
     blurry_recon = False
     n_blocks=4 
     seq_len = 1
+    
+torch.cuda.empty_cache()
 if True:
     import pickle
-    with open(f"{data_and_model_storage_path}clip_img_embedder", "rb") as input_file:
+    with open(f"{data_and_model_storage_path}/clip_img_embedder", "rb") as input_file:
         clip_img_embedder = pickle.load(input_file)
     clip_img_embedder.to(device)
     clip_seq_dim = 256
@@ -198,8 +200,8 @@ if True:
 
     # Load pretrained model ckpt
     # Replace with pre_trained_fine_tuned_model.pth
-    tag= 'pretrained_fine-tuned.pth'
-    outdir = os.path.abspath(f'{data_and_model_storage_path}')
+    tag='pretrained_fine-tuned_sliceTimed0.5.pth'
+    outdir = os.path.abspath(f'{data_and_model_storage_path}/')
 
     # print(f"\n---loading {outdir}/{tag}.pth ckpt---\n")
     try:
@@ -216,7 +218,8 @@ if True:
 
 if True:
     # prep unCLIP
-    config = OmegaConf.load("generative_models/configs/unclip6.yaml")
+    # print(os.getcwd())
+    config = OmegaConf.load(f"{rt_cloud_path}/generative_models/configs/unclip6.yaml")
     config = OmegaConf.to_container(config, resolve=True)
     unclip_params = config["model"]["params"]
     network_config = unclip_params["network_config"]
@@ -230,7 +233,7 @@ if True:
    # first_stage_config['target'] = 'sgm.models.autoencoder.AutoencoderKL'
     sampler_config['params']['num_steps'] = 38
     import pickle
-    with open(f"{data_and_model_storage_path}diffusion_engine", "rb") as input_file:
+    with open(f"{data_and_model_storage_path}/diffusion_engine", "rb") as input_file:
         diffusion_engine = pickle.load(input_file)
     # set to inference
     diffusion_engine.eval().requires_grad_(False)
@@ -243,7 +246,7 @@ if True:
         "crop_coords_top_left": torch.zeros(1, 2).to(device)}
     out = diffusion_engine.conditioner(batch)
     vector_suffix = out["vector"].to(device)
-    f = h5py.File(f'{data_and_model_storage_path}coco_images_224_float16.hdf5', 'r')
+    f = h5py.File(f'{data_and_model_storage_path}/coco_images_224_float16.hdf5', 'r')
     images = f['images']
 
 """-----------------------------------------------------------------------------
@@ -270,10 +273,11 @@ if True:
     import pdb
     from nilearn.glm.first_level import *
     from nilearn.image import get_data, index_img, concat_imgs, new_img_like
-    cwd = os.getcwd()
-    print("cwd ", cwd)
-    print(os.listdir("projects/mindeye/BidsDir/"))
-    sys.path.append(cwd)
+    # cwd = os.getcwd()
+    # print("cwd ", cwd)
+    # print(os.listdir("projects/mindeye/BidsDir/"))
+    sys.path.append(f'{rt_cloud_path}/projects/mindeye/BidsDir')
+    sys.path.append(f'{rt_cloud_path}')
     from rtCommon.utils import loadConfigFile, stringPartialFormat
     from rtCommon.clientInterface import ClientInterface
     from rtCommon.bidsArchive import BidsArchive
@@ -305,16 +309,16 @@ except:
     pass
 
 # get the mask and the reference files
-ndscore_events = [pd.read_csv(f'{data_and_model_storage_path}sub-01_ses-nsd02_task-nsdcore_run-{run:02d}_events.tsv', sep = "\t", header = 0) for run in range(1,2)]# create a new list of events_df's which will have the trial_type modified to be unique identifiers
-ndscore_tr_labels = [pd.read_csv(f"{data_and_model_storage_path}sub-01_ses-nsd02_task-nsdcore_run-{run_num:02d}_tr_labels.csv") for run_num in range(1,2)]
+ndscore_events = [pd.read_csv(f'{data_and_model_storage_path}/sub-01_ses-nsd02_task-nsdcore_run-{run:02d}_events.tsv', sep = "\t", header = 0) for run in range(1,2)]# create a new list of events_df's which will have the trial_type modified to be unique identifiers
+ndscore_tr_labels = [pd.read_csv(f"{data_and_model_storage_path}/sub-01_ses-nsd02_task-nsdcore_run-{run_num:02d}_tr_labels.csv") for run_num in range(1,2)]
 tr_length = 1.6
-mask_img = nib.load(f'{data_and_model_storage_path}sub-01_nsdgeneral_to_day1ref.nii.gz')
-day1_boldref= f"{data_and_model_storage_path}day1_bold_ref.nii.gz" #day 1 reference image is the middle volume (vol0094) of day1run1
-day2_boldref= f"{data_and_model_storage_path}day2_bold_ref.nii.gz" #day 2 reference image is the first volume (vol0000) of day2
-day2_to_day1_mat =  f"{data_and_model_storage_path}day2ref_to_day1ref"
+mask_img = nib.load(f'{data_and_model_storage_path}/sub-01_nsdgeneral_to_day1ref.nii.gz')
+day1_boldref= f"{data_and_model_storage_path}/day1_bold_ref.nii.gz" #day 1 reference image is the middle volume (vol0094) of day1run1
+day2_boldref= f"{data_and_model_storage_path}/day2_bold_ref.nii.gz" #day 2 reference image is the first volume (vol0000) of day2
+day2_to_day1_mat =  f"{data_and_model_storage_path}/day2ref_to_day1ref"
 def fast_apply_mask(target=None,mask=None):
     return target[np.where(mask == 1)].T
-lss_glm = FirstLevelModel(t_r=tr_length,slice_time_ref=0,hrf_model='glover',
+lss_glm = FirstLevelModel(t_r=tr_length,slice_time_ref=0.5,hrf_model='glover',
                         drift_model='polynomial',high_pass=None,mask_img=mask_img,
                         signal_scaling=False,smoothing_fwhm=None,noise_model='ar1',
                         n_jobs=-1,verbose=-1,memory_level=1,minimize_memory=True)
@@ -388,7 +392,7 @@ def get_top_retrievals(clipvoxel, all_images, stimulus_trial_counter):
     imsize = 50
     values_dict["ground_truth"] = transforms.Resize((imsize,imsize))(all_images[stimulus_trial_counter]).float().numpy().tolist()
    # values_dict["ground_truth"] = all_images[stimulus_trial_counter].numpy().tolist()
-    for attempt in range(1):
+    for attempt in range(5):
         which = np.flip(np.argsort(fwd_sim, axis = 0))[attempt]
        # values_dict[f"attempt{(attempt+1)}"] = all_images[which.copy()].numpy().tolist()
         values_dict[f"attempt{(attempt+1)}"] = transforms.Resize((imsize,imsize))(all_images[which.copy()]).float().numpy().tolist()
@@ -399,7 +403,7 @@ for run_num in range(1,2):
     print(f"==START OF DAY 2 RUN {run_num}!==\n")
     # stream in that data!
     data_stream = BidsInterface()
-    streamID = data_stream.initBidsStream("projects/mindeye/BidsDir/", **{'datatype': 'func',
+    streamID = data_stream.initBidsStream(f"{rt_cloud_path}/projects/mindeye/BidsDir/", **{'datatype': 'func',
                                         'extension': '.nii.gz',
                                         'run': "01",
                                         'session': 'nsd02',
@@ -446,18 +450,23 @@ for run_num in range(1,2):
             -omat {day2_to_day1_mat} \
             -dof 6")
         # load nifti file
-        tmp = f'{data_and_model_storage_path}day2_subj1/tmp_run{run_num}.nii.gz'
+        tmp = f'{data_and_model_storage_path}/day2_subj1/tmp_run{run_num}.nii.gz'
         nib.save(index_img(image_data,0),tmp)
         start = time.time()
         # on first tr the motion correction will have no issue so that mc_params is properly populated
-        mc = f'{data_and_model_storage_path}day2_subj1/tmp_mc_run{run_num}'
+        mc = f'{data_and_model_storage_path}/day2_subj1/tmp_mc_run{run_num}'
         os.system(f"mcflirt -in {tmp} -reffile {day2_boldref} -out {mc} -plots -mats")
         mc_params.append(np.loadtxt(f'{mc}.par'))
-        mc_day1_aligned = f'{data_and_model_storage_path}day2_subj1/tmp_mc_day1_aligned_run{run_num}'
-        current_tr_to_day1 = f"{data_and_model_storage_path}day2_subj1/current_tr_to_day1_run{run_num}"
+
+        slice_timed = f'{data_and_model_storage_path}/day2_subj1/tmp_sT_run{run_num}'
+        slice_tcustom_path = f'{data_and_model_storage_path}/slice_timing_day2_run1.txt'
+        os.system(f"slicetimer -i {tmp} -o {slice_timed} --tcustom={slice_tcustom_path}")
+
+        mc_day1_aligned = f'{data_and_model_storage_path}/day2_subj1/tmp_mc_day1_aligned_run{run_num}'
+        current_tr_to_day1 = f"{data_and_model_storage_path}/day2_subj1/current_tr_to_day1_run{run_num}"
         os.system(f"convert_xfm -concat {day2_to_day1_mat} -omat {current_tr_to_day1} {mc}.mat/MAT_0000")    
         # apply concatenated matrix to the current TR
-        os.system(f"flirt -in {tmp} \
+        os.system(f"flirt -in {slice_timed} \
         -ref {day1_boldref} \
         -out {mc_day1_aligned} \
         -init {current_tr_to_day1} \
@@ -466,7 +475,6 @@ for run_num in range(1,2):
         os.system(f"rm -r {mc}.mat") 
         imgs.append(get_data(mc_day1_aligned + ".nii.gz")) # only add to imgs list
         if tr_labels_hrf[TR] != tr_labels_hrf[TR + 1] and tr_labels_hrf[TR] != "blank":
-            # the current image is the last TR of a real image
             cropped_events = events_df[events_df.trial_number <= int(float(tr_labels_hrf[TR].split("_")[3]))]
             for i_trial, trial in cropped_events.iterrows():
                 cropped_events.loc[i_trial, "trial_type"] = "reference" if i_trial < (len(cropped_events) - 1) else "probe"
@@ -481,9 +489,6 @@ for run_num in range(1,2):
             beta_map = lss_glm.compute_contrast("probe", output_type="effect_size")
             beta_map_np = beta_map.get_fdata()
             beta_map_np = fast_apply_mask(target=beta_map_np,mask=mask_img.get_fdata())
-            beta_maps_list.append(beta_map_np)
-            index_for_norm = min(20, stimulus_trial_counter + 1)
-            beta_map_np = (beta_map_np - np.mean(np.vstack(beta_maps_list)[:index_for_norm,:], axis = 0)) / np.std(np.vstack(beta_maps_list)[:index_for_norm,:], axis = 0)
             beta_map_np = np.reshape(beta_map_np, (1,1,25225))
             betas_tt = torch.Tensor(beta_map_np).to("cpu")
             new_image_pt = torch.from_numpy(images[image_COCO_id])
@@ -496,7 +501,6 @@ for run_num in range(1,2):
             stimulus_trial_counter += 1
         else:
             if tr_labels_hrf[TR] != "blank":
-                # this is the non-last TR of a real image
                 values_dict = {}
                 image_COCO_id = int(float(tr_labels_hrf[TR].split("_")[1])) - 1
                 imsize = 50
@@ -504,11 +508,11 @@ for run_num in range(1,2):
                 subjInterface.setResultDict(name=f'run{run_num}_TR{TR}',
                                             values=values_dict)
             else:
-                # blank TR
                 # when we are not at the end of a stimulus trial, send an empty dictionary to the analysis listener with "pass"
                 subjInterface.setResultDict(name=f'run{run_num}_TR{TR}',
                                 values={'pass': "pass"})
         
     print(f"==END OF RUN {run_num}!==\n")
     bidsInterface.closeStream(streamID)
+
 
