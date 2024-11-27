@@ -23,7 +23,7 @@ def np_to_Image(x):
     return PIL.Image.fromarray((x.transpose(1, 2, 0)*127.5+128).clip(0,255).astype('uint8'))
 
 # Specify analysis_listener outputs folder
-absolute_path = "" # TODO fill this in where your rt-cloud directory is cloned on your analysis listener computer
+absolute_path = "/home/ri4541@pu.win.princeton.edu" # TODO fill this in where your rt-cloud directory is cloned on your analysis listener computer
 outPath = f"{absolute_path}/rt-cloud/outDir"
 recons_or_retrievals = "ret"
 # Setup variables

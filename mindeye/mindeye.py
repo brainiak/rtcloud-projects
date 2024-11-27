@@ -3,8 +3,9 @@
 # server where the data analyzer is run so that the data analyzer code with 
 # the GPU can access these files
 # You should replace the below path with your location
-data_and_model_storage_path = '/scratch/gpfs/ri4541/rt_mindEye/rt_all_data'
-rt_cloud_path = '/scratch/gpfs/ri4541/rt-cloud'
+#data_and_model_storage_path = '/scratch/gpfs/ri4541/rt_mindEye/rt_all_data'
+data_and_model_storage_path = '/home/ri4541@pu.win.princeton.edu/rt_mindeye/rt_all_data'
+rt_cloud_path = '/home/ri4541@pu.win.princeton.edu/rtcloud-projects/mindeye'
 """-----------------------------------------------------------------------------
 Imports and set up for mindEye
 -----------------------------------------------------------------------------"""
@@ -273,11 +274,7 @@ if True:
     import pdb
     from nilearn.glm.first_level import *
     from nilearn.image import get_data, index_img, concat_imgs, new_img_like
-    # cwd = os.getcwd()
-    # print("cwd ", cwd)
-    # print(os.listdir("projects/mindeye/BidsDir/"))
-    sys.path.append(f'{rt_cloud_path}/projects/mindeye/BidsDir')
-    sys.path.append(f'{rt_cloud_path}')
+    sys.path.append(f'/home/ri4541@pu.win.princeton.edu/rt-cloud/')
     from rtCommon.utils import loadConfigFile, stringPartialFormat
     from rtCommon.clientInterface import ClientInterface
     from rtCommon.bidsArchive import BidsArchive
