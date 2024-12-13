@@ -6,7 +6,7 @@
 # the GPU can access these files
 # You should replace the below path with your location
 
-data_and_model_storage_path = '/scratch/gpfs/ri4541/rt_mindEye/rt_all_data/'
+data_and_model_storage_path = '/home/ri4541@pu.win.princeton.edu/rt_mindeye/rt_all_data/'
 """-----------------------------------------------------------------------------
 Imports and set up for mindEye
 -----------------------------------------------------------------------------"""

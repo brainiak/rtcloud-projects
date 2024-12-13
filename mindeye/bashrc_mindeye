@@ -17,4 +17,4 @@ FSLDIR=/opt/fsl
 PATH=${FSLDIR}/bin:${PATH}
 export FSLDIR PATH
 export LD_LIBRARY_PATH=${FSLDIR}/lib:${FSLDIR}/fslpython/lib:${LD_LIBRARY_PATH}
-conda activate rt_mindEye2
+conda activate /home/ri4541@pu.win.princeton.edu/miniforge3/envs/rt_mindEye2
