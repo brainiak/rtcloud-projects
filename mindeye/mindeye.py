@@ -10,300 +10,339 @@ rt_cloud_path = '/home/ri4541@pu.win.princeton.edu/rtcloud-projects/mindeye'
 Imports and set up for mindEye
 -----------------------------------------------------------------------------"""
 
-if True:
-    import os
-    import sys
-    import json
-    import argparse
-    import numpy as np
-    import math
-    import time
-    import random
-    import string
-    import h5py
-    from scipy import stats
-    import matplotlib.pyplot as plt
-    import torch
-    import torch.nn as nn
-    from torchvision import transforms
-    from accelerate import Accelerator, DeepSpeedPlugin
-    # SDXL unCLIP requires code from https://github.com/Stability-AI/generative-models/tree/main
-    sys.path.append(f'{rt_cloud_path}/generative_models/')
-    import sgm
-    from generative_models.sgm.modules.encoders.modules import FrozenOpenCLIPImageEmbedder, FrozenOpenCLIPEmbedder2
-    from generative_models.sgm.models.diffusion import DiffusionEngine
-    from generative_models.sgm.util import append_dims
-    from omegaconf import OmegaConf
-    # tf32 data type is faster than standard float32
-    torch.backends.cuda.matmul.allow_tf32 = True
-    # custom functions #
-    import utils_mindeye
-    from models import *
-    ### Multi-GPU config ###
-    local_rank = os.getenv('RANK')
-    if local_rank is None: 
-        local_rank = 0
-    else:
-        local_rank = int(local_rank)
-    accelerator = Accelerator(split_batches=False, mixed_precision="fp16")
-    device = accelerator.device
-    cache_dir= f"{data_and_model_storage_path}/cache"
-    model_name="multisubject_subj01_1024hid_nolow_300ep_milestone2"
-    subj=1
-    hidden_dim=1024
-    blurry_recon = False
-    n_blocks=4 
-    seq_len = 1
+import os
+import sys
+import json
+import argparse
+import numpy as np
+import math
+import time
+import random
+import string
+import h5py
+from scipy import stats
+import matplotlib.pyplot as plt
+import torch
+import torch.nn as nn
+from torchvision import transforms
+from accelerate import Accelerator, DeepSpeedPlugin
+# SDXL unCLIP requires code from https://github.com/Stability-AI/generative-models/tree/main
+sys.path.append(f'{rt_cloud_path}/generative_models/')
+import sgm
+from generative_models.sgm.modules.encoders.modules import FrozenOpenCLIPImageEmbedder, FrozenOpenCLIPEmbedder2
+from generative_models.sgm.models.diffusion import DiffusionEngine
+from generative_models.sgm.util import append_dims
+from omegaconf import OmegaConf
+# tf32 data type is faster than standard float32
+torch.backends.cuda.matmul.allow_tf32 = True
+# custom functions #
+import utils_mindeye
+from models import *
+### Multi-GPU config ###
+local_rank = os.getenv('RANK')
+if local_rank is None: 
+    local_rank = 0
+else:
+    local_rank = int(local_rank)
+accelerator = Accelerator(split_batches=False, mixed_precision="fp16")
+device = accelerator.device
+cache_dir= f"{data_and_model_storage_path}/cache"
+model_name="multisubject_subj01_1024hid_nolow_300ep_milestone2"
+subj=1
+hidden_dim=1024
+blurry_recon = False
+n_blocks=4 
+seq_len = 1
     
 torch.cuda.empty_cache()
-if True:
-    import pickle
-    with open(f"{data_and_model_storage_path}/clip_img_embedder", "rb") as input_file:
-        clip_img_embedder = pickle.load(input_file)
-    clip_img_embedder.to(device)
-    clip_seq_dim = 256
-    clip_emb_dim = 1664
+import pickle
+with open(f"{data_and_model_storage_path}/clip_img_embedder", "rb") as input_file:
+    clip_img_embedder = pickle.load(input_file)
+clip_img_embedder.to(device)
+clip_seq_dim = 256
+clip_emb_dim = 1664
 
+cache_dir= f"{data_and_model_storage_path}cache"
+model_name="multisubject_subj01_1024hid_nolow_300ep_milestone2"
+subj=1
+hidden_dim=1024
+blurry_recon = False
+n_blocks=4 
+seq_len = 1
 
-    class MindEyeModule(nn.Module):
-        def __init__(self):
-            super(MindEyeModule, self).__init__()
-        def forward(self, x):
-            return x
-            
-    model = MindEyeModule()
+import pickle
+with open(f"{data_and_model_storage_path}clip_img_embedder", "rb") as input_file:
+    clip_img_embedder = pickle.load(input_file)
+clip_img_embedder.to(device)
+clip_seq_dim = 256
+clip_emb_dim = 1664
 
-    class RidgeRegression(torch.nn.Module):
-        # make sure to add weight_decay when initializing optimizer
-        def __init__(self, input_sizes, out_features, seq_len): 
-            super(RidgeRegression, self).__init__()
-            self.out_features = out_features
-            self.linears = torch.nn.ModuleList([
-                    torch.nn.Linear(input_size, out_features) for input_size in input_sizes
-                ])
-        def forward(self, x, subj_idx):
-            out = torch.cat([self.linears[subj_idx](x[:,seq]).unsqueeze(1) for seq in range(seq_len)], dim=1)
-            return out
-    num_voxels = 25225
-    model.ridge = RidgeRegression([num_voxels], out_features=hidden_dim, seq_len=seq_len)
+class MindEyeModule(nn.Module):
+    def __init__(self):
+        super(MindEyeModule, self).__init__()
+    def forward(self, x):
+        return x
 
-    from diffusers.models.vae import Decoder
-    class BrainNetwork(nn.Module):
-        def __init__(self, h=4096, in_dim=15724, out_dim=768, seq_len=2, n_blocks=n_blocks, drop=.15, 
-                    clip_size=768):
-            super().__init__()
-            self.seq_len = seq_len
-            self.h = h
-            self.clip_size = clip_size
-            
-            self.mixer_blocks1 = nn.ModuleList([
-                self.mixer_block1(h, drop) for _ in range(n_blocks)
+model = MindEyeModule()
+
+class RidgeRegression(torch.nn.Module):
+    # make sure to add weight_decay when initializing optimizer
+    def __init__(self, input_sizes, out_features, seq_len): 
+        super(RidgeRegression, self).__init__()
+        self.out_features = out_features
+        self.linears = torch.nn.ModuleList([
+                torch.nn.Linear(input_size, out_features) for input_size in input_sizes
             ])
-            self.mixer_blocks2 = nn.ModuleList([
-                self.mixer_block2(seq_len, drop) for _ in range(n_blocks)
-            ])
-            
-            # Output linear layer
-            self.backbone_linear = nn.Linear(h * seq_len, out_dim, bias=True) 
-            self.clip_proj = self.projector(clip_size, clip_size, h=clip_size)
-        
-                
-        def projector(self, in_dim, out_dim, h=2048):
-            return nn.Sequential(
-                nn.LayerNorm(in_dim),
-                nn.GELU(),
-                nn.Linear(in_dim, h),
-                nn.LayerNorm(h),
-                nn.GELU(),
-                nn.Linear(h, h),
-                nn.LayerNorm(h),
-                nn.GELU(),
-                nn.Linear(h, out_dim)
-            )
-        
-        def mlp(self, in_dim, out_dim, drop):
-            return nn.Sequential(
-                nn.Linear(in_dim, out_dim),
-                nn.GELU(),
-                nn.Dropout(drop),
-                nn.Linear(out_dim, out_dim),
-            )
-        
-        def mixer_block1(self, h, drop):
-            return nn.Sequential(
-                nn.LayerNorm(h),
-                self.mlp(h, h, drop),  # Token mixing
-            )
+    def forward(self, x, subj_idx):
+        out = torch.cat([self.linears[subj_idx](x[:,seq]).unsqueeze(1) for seq in range(seq_len)], dim=1)
+        return out
+num_voxels = 25225
+model.ridge = RidgeRegression([num_voxels], out_features=hidden_dim, seq_len=seq_len)
 
-        def mixer_block2(self, seq_len, drop):
-            return nn.Sequential(
-                nn.LayerNorm(seq_len),
-                self.mlp(seq_len, seq_len, drop)  # Channel mixing
-            )
-            
-        def forward(self, x):
-            # make empty tensors
-            c,b,t = torch.Tensor([0.]), torch.Tensor([[0.],[0.]]), torch.Tensor([0.])
-            
-            # Mixer blocks
-            residual1 = x
-            residual2 = x.permute(0,2,1)
-            for block1, block2 in zip(self.mixer_blocks1,self.mixer_blocks2):
-                x = block1(x) + residual1
-                residual1 = x
-                x = x.permute(0,2,1)
-                
-                x = block2(x) + residual2
-                residual2 = x
-                x = x.permute(0,2,1)
-                
-            x = x.reshape(x.size(0), -1)
-            backbone = self.backbone_linear(x).reshape(len(x), -1, self.clip_size)
-            c = self.clip_proj(backbone)
-            
-            return backbone, c, b
+from diffusers.models.vae import Decoder
+class BrainNetwork(nn.Module):
+    def __init__(self, h=4096, in_dim=15724, out_dim=768, seq_len=2, n_blocks=n_blocks, drop=.15, 
+                clip_size=768):
+        super().__init__()
+        self.seq_len = seq_len
+        self.h = h
+        self.clip_size = clip_size
 
-    model.backbone = BrainNetwork(h=hidden_dim, in_dim=hidden_dim, seq_len=seq_len, 
-                            clip_size=clip_emb_dim, out_dim=clip_emb_dim*clip_seq_dim) 
-    utils_mindeye.count_params(model.ridge)
-    utils_mindeye.count_params(model.backbone)
-    utils_mindeye.count_params(model)
+        self.mixer_blocks1 = nn.ModuleList([
+            self.mixer_block1(h, drop) for _ in range(n_blocks)
+        ])
+        self.mixer_blocks2 = nn.ModuleList([
+            self.mixer_block2(seq_len, drop) for _ in range(n_blocks)
+        ])
 
-    # setup diffusion prior network
-    out_dim = clip_emb_dim
-    depth = 6
-    dim_head = 52
-    heads = clip_emb_dim//52 # heads * dim_head = clip_emb_dim
-    timesteps = 100
+        # Output linear layer
+        self.backbone_linear = nn.Linear(h * seq_len, out_dim, bias=True) 
+        self.clip_proj = self.projector(clip_size, clip_size, h=clip_size)
 
-    prior_network = PriorNetwork(
-            dim=out_dim,
-            depth=depth,
-            dim_head=dim_head,
-            heads=heads,
-            causal=False,
-            num_tokens = clip_seq_dim,
-            learned_query_mode="pos_emb"
+
+    def projector(self, in_dim, out_dim, h=2048):
+        return nn.Sequential(
+            nn.LayerNorm(in_dim),
+            nn.GELU(),
+            nn.Linear(in_dim, h),
+            nn.LayerNorm(h),
+            nn.GELU(),
+            nn.Linear(h, h),
+            nn.LayerNorm(h),
+            nn.GELU(),
+            nn.Linear(h, out_dim)
         )
 
-    model.diffusion_prior = BrainDiffusionPrior(
-        net=prior_network,
-        image_embed_dim=out_dim,
-        condition_on_text_encodings=False,
-        timesteps=timesteps,
-        cond_drop_prob=0.2,
-        image_embed_scale=None,
+    def mlp(self, in_dim, out_dim, drop):
+        return nn.Sequential(
+            nn.Linear(in_dim, out_dim),
+            nn.GELU(),
+            nn.Dropout(drop),
+            nn.Linear(out_dim, out_dim),
+        )
+
+    def mixer_block1(self, h, drop):
+        return nn.Sequential(
+            nn.LayerNorm(h),
+            self.mlp(h, h, drop),  # Token mixing
+        )
+
+    def mixer_block2(self, seq_len, drop):
+        return nn.Sequential(
+            nn.LayerNorm(seq_len),
+            self.mlp(seq_len, seq_len, drop)  # Channel mixing
+        )
+
+    def forward(self, x):
+        # make empty tensors
+        c,b,t = torch.Tensor([0.]), torch.Tensor([[0.],[0.]]), torch.Tensor([0.])
+
+        # Mixer blocks
+        residual1 = x
+        residual2 = x.permute(0,2,1)
+        for block1, block2 in zip(self.mixer_blocks1,self.mixer_blocks2):
+            x = block1(x) + residual1
+            residual1 = x
+            x = x.permute(0,2,1)
+
+            x = block2(x) + residual2
+            residual2 = x
+            x = x.permute(0,2,1)
+
+        x = x.reshape(x.size(0), -1)
+        backbone = self.backbone_linear(x).reshape(len(x), -1, self.clip_size)
+        c = self.clip_proj(backbone)
+
+        return backbone, c, b
+
+model.backbone = BrainNetwork(h=hidden_dim, in_dim=hidden_dim, seq_len=seq_len, 
+                        clip_size=clip_emb_dim, out_dim=clip_emb_dim*clip_seq_dim) 
+utils_mindeye.count_params(model.ridge)
+utils_mindeye.count_params(model.backbone)
+utils_mindeye.count_params(model)
+
+# setup diffusion prior network
+out_dim = clip_emb_dim
+depth = 6
+dim_head = 52
+heads = clip_emb_dim//52 # heads * dim_head = clip_emb_dim
+timesteps = 100
+
+prior_network = PriorNetwork(
+        dim=out_dim,
+        depth=depth,
+        dim_head=dim_head,
+        heads=heads,
+        causal=False,
+        num_tokens = clip_seq_dim,
+        learned_query_mode="pos_emb"
     )
-    model.to(device)
 
-    utils_mindeye.count_params(model.diffusion_prior)
-    utils_mindeye.count_params(model)
+model.diffusion_prior = BrainDiffusionPrior(
+    net=prior_network,
+    image_embed_dim=out_dim,
+    condition_on_text_encodings=False,
+    timesteps=timesteps,
+    cond_drop_prob=0.2,
+    image_embed_scale=None,
+)
+model.to(device)
 
-    # Load pretrained model ckpt
-    # Replace with pre_trained_fine_tuned_model.pth
-    tag='pretrained_fine-tuned_sliceTimed0.5.pth'
-    outdir = os.path.abspath(f'{data_and_model_storage_path}/')
+utils_mindeye.count_params(model.diffusion_prior)
+utils_mindeye.count_params(model)
 
-    # print(f"\n---loading {outdir}/{tag}.pth ckpt---\n")
-    try:
-        checkpoint = torch.load(outdir+f'/{tag}', map_location='cpu')
-        state_dict = checkpoint['model_state_dict']
-        model.load_state_dict(state_dict, strict=True)
-        del checkpoint
-    except: # probably ckpt is saved using deepspeed format
-        import deepspeed
-        state_dict = deepspeed.utils.zero_to_fp32.get_fp32_state_dict_from_zero_checkpoint(checkpoint_dir=outdir, tag=tag)
-        model.load_state_dict(state_dict, strict=False)
-        del state_dict
-    # print("ckpt loaded!")
+# Load pretrained model ckpt
+# Replace with pre_trained_fine_tuned_model.pth
+tag='pretrained_fine-tuned_sliceTimed0.5.pth'
+outdir = os.path.abspath(f'{data_and_model_storage_path}')
 
-if True:
-    # prep unCLIP
-    # print(os.getcwd())
-    config = OmegaConf.load(f"{rt_cloud_path}/generative_models/configs/unclip6.yaml")
-    config = OmegaConf.to_container(config, resolve=True)
-    unclip_params = config["model"]["params"]
-    network_config = unclip_params["network_config"]
-    denoiser_config = unclip_params["denoiser_config"]
-   # first_stage_config = unclip_params["first_stage_config"]
-    conditioner_config = unclip_params["conditioner_config"]
-    sampler_config = unclip_params["sampler_config"]
-    scale_factor = unclip_params["scale_factor"]
-    disable_first_stage_autocast = unclip_params["disable_first_stage_autocast"]
-    offset_noise_level = unclip_params["loss_fn_config"]["params"]["offset_noise_level"]
-   # first_stage_config['target'] = 'sgm.models.autoencoder.AutoencoderKL'
-    sampler_config['params']['num_steps'] = 38
-    import pickle
-    with open(f"{data_and_model_storage_path}/diffusion_engine", "rb") as input_file:
-        diffusion_engine = pickle.load(input_file)
-    # set to inference
-    diffusion_engine.eval().requires_grad_(False)
-    diffusion_engine.to(device)
-    ckpt_path = f'{cache_dir}/unclip6_epoch0_step110000.ckpt'
-    ckpt = torch.load(ckpt_path, map_location='cpu')
-    diffusion_engine.load_state_dict(ckpt['state_dict'])
-    batch={"jpg": torch.randn(1,3,1,1).to(device), # jpg doesnt get used, it's just a placeholder
-        "original_size_as_tuple": torch.ones(1, 2).to(device) * 768,
-        "crop_coords_top_left": torch.zeros(1, 2).to(device)}
-    out = diffusion_engine.conditioner(batch)
-    vector_suffix = out["vector"].to(device)
-    f = h5py.File(f'{data_and_model_storage_path}/coco_images_224_float16.hdf5', 'r')
-    images = f['images']
+# prep unCLIP
+# print(os.getcwd())
+config = OmegaConf.load(f"{rt_cloud_path}/generative_models/configs/unclip6.yaml")
+config = OmegaConf.to_container(config, resolve=True)
+unclip_params = config["model"]["params"]
+network_config = unclip_params["network_config"]
+denoiser_config = unclip_params["denoiser_config"]
+# first_stage_config = unclip_params["first_stage_config"]
+conditioner_config = unclip_params["conditioner_config"]
+sampler_config = unclip_params["sampler_config"]
+scale_factor = unclip_params["scale_factor"]
+disable_first_stage_autocast = unclip_params["disable_first_stage_autocast"]
+offset_noise_level = unclip_params["loss_fn_config"]["params"]["offset_noise_level"]
+# first_stage_config['target'] = 'sgm.models.autoencoder.AutoencoderKL'
+sampler_config['params']['num_steps'] = 38
+import pickle
+with open(f"{data_and_model_storage_path}/diffusion_engine", "rb") as input_file:
+    diffusion_engine = pickle.load(input_file)
+# set to inference
+diffusion_engine.eval().requires_grad_(False)
+diffusion_engine.to(device)
+ckpt_path = f'{cache_dir}/unclip6_epoch0_step110000.ckpt'
+ckpt = torch.load(ckpt_path, map_location='cpu')
+diffusion_engine.load_state_dict(ckpt['state_dict'])
+batch={"jpg": torch.randn(1,3,1,1).to(device), # jpg doesnt get used, it's just a placeholder
+    "original_size_as_tuple": torch.ones(1, 2).to(device) * 768,
+    "crop_coords_top_left": torch.zeros(1, 2).to(device)}
+out = diffusion_engine.conditioner(batch)
+vector_suffix = out["vector"].to(device)
+f = h5py.File(f'{data_and_model_storage_path}/coco_images_224_float16.hdf5', 'r')
+images = f['images']
 
 """-----------------------------------------------------------------------------
 Imports for rtcloud
 -----------------------------------------------------------------------------"""
-if True:
-    import warnings
-    warnings.filterwarnings("ignore", category=FutureWarning)
-    warnings.filterwarnings("ignore", category=UserWarning)
-    import os
-    import sys
-    import argparse
-    import json
-    import tempfile
-    import time
-    import nibabel as nib
-    import pandas as pd
-    import numpy as np
-    from subprocess import call
-    from pathlib import Path
-    from datetime import datetime, date
-    from scipy.stats import zscore
-    from nilearn.signal import clean
-    import pdb
-    from nilearn.glm.first_level import *
-    from nilearn.image import get_data, index_img, concat_imgs, new_img_like
-    sys.path.append(f'/home/ri4541@pu.win.princeton.edu/rt-cloud/')
-    from rtCommon.utils import loadConfigFile, stringPartialFormat
-    from rtCommon.clientInterface import ClientInterface
-    from rtCommon.bidsArchive import BidsArchive
-    from rtCommon.bidsRun import BidsRun
-    from rtCommon.bidsInterface import *
-    projectDir = os.path.dirname(os.path.realpath(__file__)) #'.../rt-cloud/projects/project_name'
-    today = date.today()
-    dateString = today.strftime('%Y%m%d')
-    today = date.today()
-    # Month abbreviation, day and year	
-    d4 = today.strftime("%b-%d-%Y")
-    # Initialize the remote procedure call (RPC) for the data_analyser
-    # (aka projectInferface). This will give us a dataInterface for retrieving
-    # files, a subjectInterface for giving feedback, a webInterface
-    # for updating what is displayed on the experimenter's webpage,
-    # and enable BIDS functionality
-    clientInterfaces = ClientInterface(rpyc_timeout=999999)
-    webInterface  = clientInterfaces.webInterface
-    bidsInterface = clientInterfaces.bidsInterface
-    subjInterface = clientInterfaces.subjInterface
-    subjInterface.subjectRemote = True
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
+import os
+import sys
+import argparse
+import json
+import tempfile
+import time
+import nibabel as nib
+import pandas as pd
+import numpy as np
+from subprocess import call
+from pathlib import Path
+from datetime import datetime, date
+from scipy.stats import zscore
+from nilearn.signal import clean
+import pdb
+from nilearn.glm.first_level import *
+from nilearn.image import get_data, index_img, concat_imgs, new_img_like
+sys.path.append(f'/home/ri4541@pu.win.princeton.edu/rt-cloud/')
+from rtCommon.utils import loadConfigFile, stringPartialFormat
+from rtCommon.clientInterface import ClientInterface
+from rtCommon.bidsArchive import BidsArchive
+from rtCommon.bidsRun import BidsRun
+from rtCommon.bidsInterface import *
+projectDir = os.path.dirname(os.path.realpath(__file__)) #'.../rt-cloud/projects/project_name'
+today = date.today()
+dateString = today.strftime('%Y%m%d')
+today = date.today()
+# Month abbreviation, day and year	
+d4 = today.strftime("%b-%d-%Y")
+# Initialize the remote procedure call (RPC) for the data_analyser
+# (aka projectInferface). This will give us a dataInterface for retrieving
+# files, a subjectInterface for giving feedback, a webInterface
+# for updating what is displayed on the experimenter's webpage,
+# and enable BIDS functionality
+clientInterfaces = ClientInterface(rpyc_timeout=999999)
+webInterface  = clientInterfaces.webInterface
+bidsInterface = clientInterfaces.bidsInterface
+subjInterface = clientInterfaces.subjInterface
+subjInterface.subjectRemote = True
 
 """====================REAL-TIME ANALYSIS BELOW====================
 ===================================================================="""
 # clear existing web browser plots if there are any
 try:
-    webInterface.clearAllPlots()
-except:
-    pass
+    checkpoint = torch.load(outdir+f'/{tag}', map_location='cpu')
+    state_dict = checkpoint['model_state_dict']
+    model.load_state_dict(state_dict, strict=True)
+    del checkpoint
+except: # probably ckpt is saved using deepspeed format
+    import deepspeed
+    state_dict = deepspeed.utils.zero_to_fp32.get_fp32_state_dict_from_zero_checkpoint(checkpoint_dir=outdir, tag=tag)
+    model.load_state_dict(state_dict, strict=False)
+    del state_dict
+# print("ckpt loaded!")
+
+# prep unCLIP
+config = OmegaConf.load("generative_models/configs/unclip6.yaml")
+config = OmegaConf.to_container(config, resolve=True)
+unclip_params = config["model"]["params"]
+network_config = unclip_params["network_config"]
+denoiser_config = unclip_params["denoiser_config"]
+# first_stage_config = unclip_params["first_stage_config"]
+conditioner_config = unclip_params["conditioner_config"]
+sampler_config = unclip_params["sampler_config"]
+scale_factor = unclip_params["scale_factor"]
+disable_first_stage_autocast = unclip_params["disable_first_stage_autocast"]
+offset_noise_level = unclip_params["loss_fn_config"]["params"]["offset_noise_level"]
+# first_stage_config['target'] = 'sgm.models.autoencoder.AutoencoderKL'
+sampler_config['params']['num_steps'] = 38
+with open(f"{data_and_model_storage_path}diffusion_engine", "rb") as input_file:
+    diffusion_engine = pickle.load(input_file)
+# set to inference
+diffusion_engine.eval().requires_grad_(False)
+diffusion_engine.to(device)
+ckpt_path = f'{cache_dir}/unclip6_epoch0_step110000.ckpt'
+ckpt = torch.load(ckpt_path, map_location='cpu')
+diffusion_engine.load_state_dict(ckpt['state_dict'])
+batch={"jpg": torch.randn(1,3,1,1).to(device), # jpg doesnt get used, it's just a placeholder
+    "original_size_as_tuple": torch.ones(1, 2).to(device) * 768,
+    "crop_coords_top_left": torch.zeros(1, 2).to(device)}
+out = diffusion_engine.conditioner(batch)
+vector_suffix = out["vector"].to(device)
+f = h5py.File(f'{data_and_model_storage_path}coco_images_224_float16.hdf5', 'r')
+images = f['images']
+
+import pandas as pd
+import nibabel as nib
+from nilearn.glm.first_level import *
+from nilearn.image import get_data, index_img, concat_imgs, new_img_like
 
 # get the mask and the reference files
 ndscore_events = [pd.read_csv(f'{data_and_model_storage_path}/sub-01_ses-nsd02_task-nsdcore_run-{run:02d}_events.tsv', sep = "\t", header = 0) for run in range(1,2)]# create a new list of events_df's which will have the trial_type modified to be unique identifiers
@@ -354,8 +393,8 @@ def do_reconstructions(betas_tt):
                 reconsTR = samples.cpu()
             else:
                 reconsTR = torch.vstack((reconsTR, samples.cpu()))
-            imsize = 50
-            reconsTR = transforms.Resize((imsize,imsize))(reconsTR).float().numpy().tolist()
+            imsize = 224
+            reconsTR = transforms.Resize((imsize,imsize), antialias=True)(reconsTR).float().numpy().tolist()
         return reconsTR, clipvoxelsTR
     
 def batchwise_cosine_similarity(Z,B):
@@ -386,13 +425,13 @@ def get_top_retrievals(clipvoxel, all_images, stimulus_trial_counter):
         fwd_sim = batchwise_cosine_similarity(emb_,emb)  # brain, clip
         print("Given Brain embedding, find correct Image embedding")
     fwd_sim = np.array(fwd_sim.cpu())
-    imsize = 50
-    values_dict["ground_truth"] = transforms.Resize((imsize,imsize))(all_images[stimulus_trial_counter]).float().numpy().tolist()
+    imsize = 224
+    values_dict["ground_truth"] = transforms.Resize((imsize,imsize), antialias=True)(all_images[stimulus_trial_counter]).float().numpy().tolist()
    # values_dict["ground_truth"] = all_images[stimulus_trial_counter].numpy().tolist()
     for attempt in range(5):
         which = np.flip(np.argsort(fwd_sim, axis = 0))[attempt]
        # values_dict[f"attempt{(attempt+1)}"] = all_images[which.copy()].numpy().tolist()
-        values_dict[f"attempt{(attempt+1)}"] = transforms.Resize((imsize,imsize))(all_images[which.copy()]).float().numpy().tolist()
+        values_dict[f"attempt{(attempt+1)}"] = transforms.Resize((imsize,imsize), antialias=True)(all_images[which.copy()]).float().numpy().tolist()
     return values_dict
 
 # go through each run
