@@ -1,15 +1,15 @@
-# drift correct, normalize, no slice time
-
 # set up main path where everything will be you should download the
 # hugging face directory described in readme and put it here on the same
 # server where the data analyzer is run so that the data analyzer code with 
 # the GPU can access these files
 # You should replace the below path with your location
-
-data_and_model_storage_path = '/home/ri4541@pu.win.princeton.edu/rt_mindeye/rt_all_data/'
+#data_and_model_storage_path = '/scratch/gpfs/ri4541/rt_mindEye/rt_all_data'
+data_and_model_storage_path = '/home/ri4541@pu.win.princeton.edu/rt_mindeye/rt_all_data'
+rt_cloud_path = '/home/ri4541@pu.win.princeton.edu/rtcloud-projects/mindeye'
 """-----------------------------------------------------------------------------
 Imports and set up for mindEye
 -----------------------------------------------------------------------------"""
+
 import os
 import sys
 import json
@@ -27,8 +27,7 @@ import torch.nn as nn
 from torchvision import transforms
 from accelerate import Accelerator, DeepSpeedPlugin
 # SDXL unCLIP requires code from https://github.com/Stability-AI/generative-models/tree/main
-sys.path.append('generative_models/')
-# print(sys.path)
+sys.path.append(f'{rt_cloud_path}/generative_models/')
 import sgm
 from generative_models.sgm.modules.encoders.modules import FrozenOpenCLIPImageEmbedder, FrozenOpenCLIPEmbedder2
 from generative_models.sgm.models.diffusion import DiffusionEngine
@@ -47,6 +46,21 @@ else:
     local_rank = int(local_rank)
 accelerator = Accelerator(split_batches=False, mixed_precision="fp16")
 device = accelerator.device
+cache_dir= f"{data_and_model_storage_path}/cache"
+model_name="multisubject_subj01_1024hid_nolow_300ep_milestone2"
+subj=1
+hidden_dim=1024
+blurry_recon = False
+n_blocks=4 
+seq_len = 1
+    
+torch.cuda.empty_cache()
+import pickle
+with open(f"{data_and_model_storage_path}/clip_img_embedder", "rb") as input_file:
+    clip_img_embedder = pickle.load(input_file)
+clip_img_embedder.to(device)
+clip_seq_dim = 256
+clip_emb_dim = 1664
 
 cache_dir= f"{data_and_model_storage_path}cache"
 model_name="multisubject_subj01_1024hid_nolow_300ep_milestone2"
@@ -202,7 +216,87 @@ utils_mindeye.count_params(model)
 tag='pretrained_fine-tuned_sliceTimed0.5.pth'
 outdir = os.path.abspath(f'{data_and_model_storage_path}')
 
-# print(f"\n---loading {outdir}/{tag}.pth ckpt---\n")
+# prep unCLIP
+# print(os.getcwd())
+config = OmegaConf.load(f"{rt_cloud_path}/generative_models/configs/unclip6.yaml")
+config = OmegaConf.to_container(config, resolve=True)
+unclip_params = config["model"]["params"]
+network_config = unclip_params["network_config"]
+denoiser_config = unclip_params["denoiser_config"]
+# first_stage_config = unclip_params["first_stage_config"]
+conditioner_config = unclip_params["conditioner_config"]
+sampler_config = unclip_params["sampler_config"]
+scale_factor = unclip_params["scale_factor"]
+disable_first_stage_autocast = unclip_params["disable_first_stage_autocast"]
+offset_noise_level = unclip_params["loss_fn_config"]["params"]["offset_noise_level"]
+# first_stage_config['target'] = 'sgm.models.autoencoder.AutoencoderKL'
+sampler_config['params']['num_steps'] = 38
+import pickle
+with open(f"{data_and_model_storage_path}/diffusion_engine", "rb") as input_file:
+    diffusion_engine = pickle.load(input_file)
+# set to inference
+diffusion_engine.eval().requires_grad_(False)
+diffusion_engine.to(device)
+ckpt_path = f'{cache_dir}/unclip6_epoch0_step110000.ckpt'
+ckpt = torch.load(ckpt_path, map_location='cpu')
+diffusion_engine.load_state_dict(ckpt['state_dict'])
+batch={"jpg": torch.randn(1,3,1,1).to(device), # jpg doesnt get used, it's just a placeholder
+    "original_size_as_tuple": torch.ones(1, 2).to(device) * 768,
+    "crop_coords_top_left": torch.zeros(1, 2).to(device)}
+out = diffusion_engine.conditioner(batch)
+vector_suffix = out["vector"].to(device)
+f = h5py.File(f'{data_and_model_storage_path}/coco_images_224_float16.hdf5', 'r')
+images = f['images']
+
+"""-----------------------------------------------------------------------------
+Imports for rtcloud
+-----------------------------------------------------------------------------"""
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
+import os
+import sys
+import argparse
+import json
+import tempfile
+import time
+import nibabel as nib
+import pandas as pd
+import numpy as np
+from subprocess import call
+from pathlib import Path
+from datetime import datetime, date
+from scipy.stats import zscore
+from nilearn.signal import clean
+import pdb
+from nilearn.glm.first_level import *
+from nilearn.image import get_data, index_img, concat_imgs, new_img_like
+sys.path.append(f'/home/ri4541@pu.win.princeton.edu/rt-cloud/')
+from rtCommon.utils import loadConfigFile, stringPartialFormat
+from rtCommon.clientInterface import ClientInterface
+from rtCommon.bidsArchive import BidsArchive
+from rtCommon.bidsRun import BidsRun
+from rtCommon.bidsInterface import *
+projectDir = os.path.dirname(os.path.realpath(__file__)) #'.../rt-cloud/projects/project_name'
+today = date.today()
+dateString = today.strftime('%Y%m%d')
+today = date.today()
+# Month abbreviation, day and year	
+d4 = today.strftime("%b-%d-%Y")
+# Initialize the remote procedure call (RPC) for the data_analyser
+# (aka projectInferface). This will give us a dataInterface for retrieving
+# files, a subjectInterface for giving feedback, a webInterface
+# for updating what is displayed on the experimenter's webpage,
+# and enable BIDS functionality
+clientInterfaces = ClientInterface(rpyc_timeout=999999)
+webInterface  = clientInterfaces.webInterface
+bidsInterface = clientInterfaces.bidsInterface
+subjInterface = clientInterfaces.subjInterface
+subjInterface.subjectRemote = True
+
+"""====================REAL-TIME ANALYSIS BELOW====================
+===================================================================="""
+# clear existing web browser plots if there are any
 try:
     checkpoint = torch.load(outdir+f'/{tag}', map_location='cpu')
     state_dict = checkpoint['model_state_dict']
@@ -251,16 +345,16 @@ from nilearn.glm.first_level import *
 from nilearn.image import get_data, index_img, concat_imgs, new_img_like
 
 # get the mask and the reference files
-ndscore_events = [pd.read_csv(f'{data_and_model_storage_path}sub-01_ses-nsd02_task-nsdcore_run-{run:02d}_events.tsv', sep = "\t", header = 0) for run in range(1,2)]# create a new list of events_df's which will have the trial_type modified to be unique identifiers
-ndscore_tr_labels = [pd.read_csv(f"{data_and_model_storage_path}sub-01_ses-nsd02_task-nsdcore_run-{run_num:02d}_tr_labels.csv") for run_num in range(1,2)]
+ndscore_events = [pd.read_csv(f'{data_and_model_storage_path}/sub-01_ses-nsd02_task-nsdcore_run-{run:02d}_events.tsv', sep = "\t", header = 0) for run in range(1,2)]# create a new list of events_df's which will have the trial_type modified to be unique identifiers
+ndscore_tr_labels = [pd.read_csv(f"{data_and_model_storage_path}/sub-01_ses-nsd02_task-nsdcore_run-{run_num:02d}_tr_labels.csv") for run_num in range(1,2)]
 tr_length = 1.6
-mask_img = nib.load(f'{data_and_model_storage_path}sub-01_nsdgeneral_to_day1ref.nii.gz')
-day1_boldref= f"{data_and_model_storage_path}day1_bold_ref.nii.gz" #day 1 reference image is the middle volume (vol0094) of day1run1
-day2_boldref= f"{data_and_model_storage_path}day2_bold_ref.nii.gz" #day 2 reference image is the first volume (vol0000) of day2
-day2_to_day1_mat =  f"{data_and_model_storage_path}day2ref_to_day1ref"
+mask_img = nib.load(f'{data_and_model_storage_path}/sub-01_nsdgeneral_to_day1ref.nii.gz')
+day1_boldref= f"{data_and_model_storage_path}/day1_bold_ref.nii.gz" #day 1 reference image is the middle volume (vol0094) of day1run1
+day2_boldref= f"{data_and_model_storage_path}/day2_bold_ref.nii.gz" #day 2 reference image is the first volume (vol0000) of day2
+day2_to_day1_mat =  f"{data_and_model_storage_path}/day2ref_to_day1ref"
 def fast_apply_mask(target=None,mask=None):
     return target[np.where(mask == 1)].T
-lss_glm = FirstLevelModel(t_r=tr_length,slice_time_ref=0,hrf_model='glover',
+lss_glm = FirstLevelModel(t_r=tr_length,slice_time_ref=0.5,hrf_model='glover',
                         drift_model='polynomial',high_pass=None,mask_img=mask_img,
                         signal_scaling=False,smoothing_fwhm=None,noise_model='ar1',
                         n_jobs=-1,verbose=-1,memory_level=1,minimize_memory=True)
@@ -340,150 +434,121 @@ def get_top_retrievals(clipvoxel, all_images, stimulus_trial_counter):
         values_dict[f"attempt{(attempt+1)}"] = transforms.Resize((imsize,imsize), antialias=True)(all_images[which.copy()]).float().numpy().tolist()
     return values_dict
 
-
-# get the mask and the reference files
-ndscore_events = [pd.read_csv(f'{data_and_model_storage_path}sub-01_ses-nsd02_task-nsdcore_run-{run:02d}_events.tsv', sep = "\t", header = 0) for run in range(1,2)]# create a new list of events_df's which will have the trial_type modified to be unique identifiers
-ndscore_tr_labels = [pd.read_csv(f"{data_and_model_storage_path}sub-01_ses-nsd02_task-nsdcore_run-{run_num:02d}_tr_labels.csv") for run_num in range(1,2)]
-tr_length = 1.6
-mask_img = nib.load(f'{data_and_model_storage_path}sub-01_nsdgeneral_to_day1ref.nii.gz')
-day1_boldref= f"{data_and_model_storage_path}day1_bold_ref.nii.gz" #day 1 reference image is the middle volume (vol0094) of day1run1
-day2_boldref= f"{data_and_model_storage_path}day2_bold_ref.nii.gz" #day 2 reference image is the first volume (vol0000) of day2
-day2_to_day1_mat =  f"{data_and_model_storage_path}day2ref_to_day1ref"
-def fast_apply_mask(target=None,mask=None):
-    return target[np.where(mask == 1)].T
-lss_glm = FirstLevelModel(t_r=tr_length,slice_time_ref=0.5,hrf_model='glover',
-                        drift_model=None,high_pass=None,mask_img=mask_img,
-                        signal_scaling=False,smoothing_fwhm=None,noise_model='ar1',
-                        n_jobs=-1,verbose=-1,memory_level=1,minimize_memory=True)
-day1_boldref_nibd = nib.load(day1_boldref)
-
-
-run_num = 1
-print(f"{run_num} started")
-mc_params = []
-imgs = []
-events_df = ndscore_events[run_num - 1]
-tr_labels_hrf = ndscore_tr_labels[run_num - 1]["tr_label_hrf"].tolist()
-beta_maps_list = []
-all_trial_names_list = []
-# get the all images tensor
-all_images = None
-seen_label_before = ["blank"]
-# get the list of all images in torch tensor format for this run (should be 62 or 63 images)
-all_COCO_ids = []
-for TR in range(186):
-    if tr_labels_hrf[TR] not in seen_label_before:
-        seen_label_before.append(tr_labels_hrf[TR])
-        image_COCO_id = int(float(tr_labels_hrf[TR].split("_")[1])) - 1
-        new_image_pt = torch.from_numpy(np.reshape(images[image_COCO_id],(1,3,224,224)))
-        all_images = new_image_pt if all_images == None else torch.vstack((all_images, new_image_pt))
-        all_COCO_ids.append(image_COCO_id)
-# print(all_COCO_ids)
-
-stimulus_trial_counter = 0
-bold = nib.load("/home/ri4541/rt-cloud/projects/mindeye/BidsDir/sub-01/ses-nsd02/func/sub-01_ses-nsd02_task-nsdcore_run-01_bold.nii.gz")
-for TR in range(188):
-    print(f"TR {TR}")
-    # stream in the nifti
-    image_data = bold.slicer[:,:,:,None,TR]  # None prevents the final dimension from being dropped because it's a singleton; nibabel methods expect a 4D array
-    current_label = tr_labels_hrf[TR]
-    if TR == 0:
-        day2_run1_bold_ref = image_data
-        # make the day 2 bold ref
-        nib.save(image_data, day2_boldref)
-        # save the transformation from the day 2 bold ref to the day 1 
-        os.system(f"flirt -in {day2_boldref} \
-        -ref {day1_boldref} \
-        -omat {day2_to_day1_mat} \
-        -dof 6")
-    # load nifti file
-    tmp = f'{data_and_model_storage_path}day2_subj1/tmp_run{run_num}.nii.gz'
-    nib.save(index_img(image_data,0),tmp)
-    start = time.time()
-    # on first tr the motion correction will have no issue so that mc_params is properly populated
-    mc = f'{data_and_model_storage_path}day2_subj1/tmp_mc_run{run_num}'
-    os.system(f"mcflirt -in {tmp} -reffile {day2_boldref} -out {mc} -plots -mats")
-    mc_params.append(np.loadtxt(f'{mc}.par'))
-
-    slice_timed = f'{data_and_model_storage_path}day2_subj1/tmp_sT_run{run_num}'
-    slice_tcustom_path = f'{data_and_model_storage_path}slice_timing_day2_run1.txt'
-    os.system(f"slicetimer -i {tmp} -o {slice_timed} --tcustom={slice_tcustom_path}")
-
-    mc_day1_aligned = f'{data_and_model_storage_path}day2_subj1/tmp_mc_day1_aligned_run{run_num}'
-    current_tr_to_day1 = f"{data_and_model_storage_path}day2_subj1/current_tr_to_day1_run{run_num}"
-    os.system(f"convert_xfm -concat {day2_to_day1_mat} -omat {current_tr_to_day1} {mc}.mat/MAT_0000")    
-    # apply concatenated matrix to the current TR
-    os.system(f"flirt -in {slice_timed} \
-    -ref {day1_boldref} \
-    -out {mc_day1_aligned} \
-    -init {current_tr_to_day1} \
-    -applyxfm")
-    # now delete the mc from current tr to bold reference mat
-    os.system(f"rm -r {mc}.mat") 
-    imgs.append(get_data(mc_day1_aligned + ".nii.gz")) # only add to imgs list
-    if tr_labels_hrf[TR] != tr_labels_hrf[TR + 1] and tr_labels_hrf[TR] != "blank":
-        cropped_events = events_df[events_df.trial_number <= int(float(tr_labels_hrf[TR].split("_")[3]))].astype(str)
-        for i_trial, trial in cropped_events.iterrows():
-            cropped_events.loc[i_trial, "trial_type"] = "reference" if i_trial < (len(cropped_events) - 1) else "probe"
-            
-        cropped_events = cropped_events.drop(columns=['total_novel_presses', 'change_mind', 'is_correct', 'time', 
-                                              'response_time', 'response', '73k_id', 'trial_number', 
-                                              '10k_id', 'memory_first', 'is_old_session', 'is_correct_session', 
-                                              'missing_data', 'total_old_presses', 'memory_recent'])
-
-        # get the image id from this stimulus trial that we are fitting a model on
-        image_COCO_id = int(float(tr_labels_hrf[TR].split("_")[1])) - 1
-        # collect all of the images at each TR into a 4D time series
-        img = np.rollaxis(np.array(imgs),0,4)
-        img = new_img_like(day1_boldref_nibd,img,copy_header=True)
-        # run the model with mc_params confounds to motion correct
-        lss_glm.fit(run_imgs=img,events=cropped_events, confounds = pd.DataFrame(np.array(mc_params)))
-        # get the beta map and mask it
-        beta_map = lss_glm.compute_contrast("probe", output_type="effect_size")
-        beta_map_np = beta_map.get_fdata()
-        beta_map_np = fast_apply_mask(target=beta_map_np,mask=mask_img.get_fdata())
-        beta_map_np = np.reshape(beta_map_np, (1,1,25225))
-        betas_tt = torch.Tensor(beta_map_np).to("cpu")
-        new_image_pt = torch.from_numpy(images[image_COCO_id])
-        reconsTR, clipvoxelsTR = do_reconstructions(betas_tt)
-        values_dict = get_top_retrievals(clipvoxelsTR, all_images=all_images, stimulus_trial_counter = stimulus_trial_counter)
-        image_array = np.array(reconsTR)[0]
-        # If the image has 3 channels (RGB), you need to reorder the dimensions
-        if image_array.ndim == 3 and image_array.shape[0] == 3:
-            image_array = np.transpose(image_array, (1, 2, 0))  # Change shape to (height, width, 3)
-
-        # Display the image
-        plt.imshow(image_array, cmap='gray' if image_array.ndim == 2 else None)
-        plt.axis('off')  # Hide axes
-        plt.show()
-
-        # subjInterface.setResultDict allows us to send to the analysis listener immediately
-        # subjInterface.setResultDict(name=f'run{run_num}_TR{TR}',
-        #                             values=values_dict)
-        stimulus_trial_counter += 1
-    else:
-        if tr_labels_hrf[TR] != "blank":
-            values_dict = {}
+# go through each run
+for run_num in range(1,2):
+    print(f"==START OF DAY 2 RUN {run_num}!==\n")
+    # stream in that data!
+    data_stream = BidsInterface()
+    streamID = data_stream.initBidsStream(f"{rt_cloud_path}/projects/mindeye/BidsDir/", **{'datatype': 'func',
+                                        'extension': '.nii.gz',
+                                        'run': "01",
+                                        'session': 'nsd02',
+                                        'subject': '01',
+                                        'suffix': 'bold',
+                                        'task': 'nsdcore'})
+    print(f"{run_num} started")
+    mc_params = []
+    imgs = []
+    events_df = ndscore_events[run_num - 1]
+    tr_labels_hrf = ndscore_tr_labels[run_num - 1]["tr_label_hrf"].tolist()
+    beta_maps_list = []
+    all_trial_names_list = []
+    # get the all images tensor
+    all_images = None
+    seen_label_before = ["blank"]
+    # get the list of all images in torch tensor format for this run (should be 62 or 63 images)
+    all_COCO_ids = []
+    for TR in range(186):
+        if tr_labels_hrf[TR] not in seen_label_before:
+            seen_label_before.append(tr_labels_hrf[TR])
             image_COCO_id = int(float(tr_labels_hrf[TR].split("_")[1])) - 1
-            imsize = 224
-            values_dict["ground_truth"] = transforms.Resize((imsize,imsize), antialias=True)(all_images[stimulus_trial_counter]).float().numpy().tolist()
-            image_array = np.array(values_dict["ground_truth"])
+            new_image_pt = torch.from_numpy(np.reshape(images[image_COCO_id],(1,3,224,224)))
+            all_images = new_image_pt if all_images == None else torch.vstack((all_images, new_image_pt))
+            all_COCO_ids.append(image_COCO_id)
+    print(all_COCO_ids)
+    stimulus_trial_counter = 0
+    for TR in range(186):
+        print(f"TR {TR}")
+        # stream in the nifti
+        incremental_bids_image = data_stream.getIncremental(streamID,volIdx=TR,
+                                        timeout=999999,demoStep=1.6)
+        image_data = incremental_bids_image.image
+        current_label = tr_labels_hrf[TR]
 
-            # If the image has 3 channels (RGB), you need to reorder the dimensions
-            if image_array.ndim == 3 and image_array.shape[0] == 3:
-                image_array = np.transpose(image_array, (1, 2, 0))  # Change shape to (height, width, 3)
+        
+        if TR == 0:
+            day2_run1_bold_ref = image_data
+            # make the day 2 bold ref
+            nib.save(image_data, day2_boldref)
+            # save the transformation from the day 2 bold ref to the day 1 
+            os.system(f"flirt -in {day2_boldref} \
+            -ref {day1_boldref} \
+            -omat {day2_to_day1_mat} \
+            -dof 6")
+        # load nifti file
+        tmp = f'{data_and_model_storage_path}/day2_subj1/tmp_run{run_num}.nii.gz'
+        nib.save(index_img(image_data,0),tmp)
+        start = time.time()
+        # on first tr the motion correction will have no issue so that mc_params is properly populated
+        mc = f'{data_and_model_storage_path}/day2_subj1/tmp_mc_run{run_num}'
+        os.system(f"mcflirt -in {tmp} -reffile {day2_boldref} -out {mc} -plots -mats")
+        mc_params.append(np.loadtxt(f'{mc}.par'))
 
-            # Display the image
-            plt.imshow(image_array, cmap='gray' if image_array.ndim == 2 else None)
-            plt.axis('off')  # Hide axes
-            plt.show()
-            # subjInterface.setResultDict(name=f'run{run_num}_TR{TR}',
-            #                             values=values_dict)
+        slice_timed = f'{data_and_model_storage_path}/day2_subj1/tmp_sT_run{run_num}'
+        slice_tcustom_path = f'{data_and_model_storage_path}/slice_timing_day2_run1.txt'
+        os.system(f"slicetimer -i {tmp} -o {slice_timed} --tcustom={slice_tcustom_path}")
+
+        mc_day1_aligned = f'{data_and_model_storage_path}/day2_subj1/tmp_mc_day1_aligned_run{run_num}'
+        current_tr_to_day1 = f"{data_and_model_storage_path}/day2_subj1/current_tr_to_day1_run{run_num}"
+        os.system(f"convert_xfm -concat {day2_to_day1_mat} -omat {current_tr_to_day1} {mc}.mat/MAT_0000")    
+        # apply concatenated matrix to the current TR
+        os.system(f"flirt -in {slice_timed} \
+        -ref {day1_boldref} \
+        -out {mc_day1_aligned} \
+        -init {current_tr_to_day1} \
+        -applyxfm")
+        # now delete the mc from current tr to bold reference mat
+        os.system(f"rm -r {mc}.mat") 
+        imgs.append(get_data(mc_day1_aligned + ".nii.gz")) # only add to imgs list
+        if tr_labels_hrf[TR] != tr_labels_hrf[TR + 1] and tr_labels_hrf[TR] != "blank":
+            cropped_events = events_df[events_df.trial_number <= int(float(tr_labels_hrf[TR].split("_")[3]))]
+            for i_trial, trial in cropped_events.iterrows():
+                cropped_events.loc[i_trial, "trial_type"] = "reference" if i_trial < (len(cropped_events) - 1) else "probe"
+            # get the image id from this stimulus trial that we are fitting a model on
+            image_COCO_id = int(float(tr_labels_hrf[TR].split("_")[1])) - 1
+            # collect all of the images at each TR into a 4D time series
+            img = np.rollaxis(np.array(imgs),0,4)
+            img = new_img_like(day1_boldref_nibd,img,copy_header=True)
+            # run the model with mc_params confounds to motion correct
+            lss_glm.fit(run_imgs=img,events=cropped_events, confounds = pd.DataFrame(np.array(mc_params)))
+            # get the beta map and mask it
+            beta_map = lss_glm.compute_contrast("probe", output_type="effect_size")
+            beta_map_np = beta_map.get_fdata()
+            beta_map_np = fast_apply_mask(target=beta_map_np,mask=mask_img.get_fdata())
+            beta_map_np = np.reshape(beta_map_np, (1,1,25225))
+            betas_tt = torch.Tensor(beta_map_np).to("cpu")
+            new_image_pt = torch.from_numpy(images[image_COCO_id])
+            reconsTR, clipvoxelsTR = do_reconstructions(betas_tt)
+            values_dict = get_top_retrievals(clipvoxelsTR, all_images=all_images, stimulus_trial_counter = stimulus_trial_counter)
+            values_dict["recons"] = reconsTR
+            # subjInterface.setResultDict allows us to send to the analysis listener immediately
+            subjInterface.setResultDict(name=f'run{run_num}_TR{TR}',
+                                        values=values_dict)
+            stimulus_trial_counter += 1
         else:
-            pass
-            # when we are not at the end of a stimulus trial, send an empty dictionary to the analysis listener with "pass"
-            # subjInterface.setResultDict(name=f'run{run_num}_TR{TR}',
-            #                 values={'pass': "pass"})
+            if tr_labels_hrf[TR] != "blank":
+                values_dict = {}
+                image_COCO_id = int(float(tr_labels_hrf[TR].split("_")[1])) - 1
+                imsize = 50
+                values_dict["ground_truth"] = transforms.Resize((imsize,imsize))(all_images[stimulus_trial_counter]).float().numpy().tolist()
+                subjInterface.setResultDict(name=f'run{run_num}_TR{TR}',
+                                            values=values_dict)
+            else:
+                # when we are not at the end of a stimulus trial, send an empty dictionary to the analysis listener with "pass"
+                subjInterface.setResultDict(name=f'run{run_num}_TR{TR}',
+                                values={'pass': "pass"})
+        
+    print(f"==END OF RUN {run_num}!==\n")
+    bidsInterface.closeStream(streamID)
 
-print(f"==END OF RUN {run_num}!==\n")
 
