@@ -219,7 +219,7 @@ pixcorr_preprocess = transforms.Compose([
 ])
 def pixcorr(images,brains,nan=True):
     all_images_flattened = pixcorr_preprocess(images).reshape(len(images), -1)
-    all_brain_recons_flattened = pixcorr_preprocess(brains).view(len(brains), -1)
+    all_brain_recons_flattened = pixcorr_preprocess(brains).reshape(len(brains), -1)
     if nan:
         corrmean = torch.nanmean(torch.diag(batchwise_pearson_correlation(all_images_flattened, all_brain_recons_flattened)))
     else:
@@ -322,3 +322,340 @@ def ddp(model):
     if isinstance(model, torch.nn.parallel.DistributedDataParallel):
         return model.module
     return model
+
+
+
+
+
+#########################################################
+####### Evaluation utils
+#########################################################
+
+from generative_models.sgm.modules.encoders.modules import FrozenOpenCLIPImageEmbedder
+from scipy import stats
+from tqdm import tqdm
+def calculate_retrieval_metrics(all_clip_voxels, all_images):
+    print("Loading clip_img_embedder")
+    try:
+        print(clip_img_embedder)
+    except:
+        clip_img_embedder = FrozenOpenCLIPImageEmbedder(
+            arch="ViT-bigG-14",
+            version="laion2b_s39b_b160k",
+            output_tokens=True,
+            only_tokens=True,
+        )
+        clip_img_embedder.to(device)
+    clip_seq_dim = 256
+    clip_emb_dim = 1664
+
+    all_fwd_acc = []
+    all_bwd_acc = []
+
+    assert len(all_images) == len(all_clip_voxels)  
+    print("The total pool of images and clip voxels to do retrieval on is: ", len(all_images))
+    all_percent_correct_fwds, all_percent_correct_bwds = [], []
+
+    with torch.cuda.amp.autocast(dtype=torch.float16):
+        print("Creating embeddings for images")
+        with torch.no_grad():
+            all_emb = clip_img_embedder(all_images.to(torch.float16).to(device)).float() # CLIP-Image
+
+        all_emb_ = all_clip_voxels # CLIP-Brain
+
+        print("Calculating retrieval metrics")
+        # flatten if necessary
+        all_emb = all_emb.reshape(len(all_emb),-1).to(device)
+        all_emb_ = all_emb_.reshape(len(all_emb_),-1).to(device)
+
+        # l2norm 
+        all_emb = nn.functional.normalize(all_emb,dim=-1)
+        all_emb_ = nn.functional.normalize(all_emb_,dim=-1)
+
+        all_labels = torch.arange(len(all_emb)).to(device)
+        all_bwd_sim = batchwise_cosine_similarity(all_emb,all_emb_)  # clip, brain
+        all_fwd_sim = batchwise_cosine_similarity(all_emb_,all_emb)  # brain, clip
+
+        # if "ses-0" not in model_name or "ses-01" in model_name or "ses-04" in model_name:
+        #     assert len(all_fwd_sim) == 100
+        #     assert len(all_bwd_sim) == 100
+        # else:
+        #     assert len(all_fwd_sim) == 50
+        #     assert len(all_bwd_sim) == 50
+        
+        all_percent_correct_fwds = topk(all_fwd_sim, all_labels, k=1).item()
+        all_percent_correct_bwds = topk(all_bwd_sim, all_labels, k=1).item()
+
+    all_fwd_acc.append(all_percent_correct_fwds)
+    all_bwd_acc.append(all_percent_correct_bwds)
+
+    all_fwd_sim = np.array(all_fwd_sim.cpu())
+    all_bwd_sim = np.array(all_bwd_sim.cpu())
+
+    print(f"overall fwd percent_correct: {all_fwd_acc[0]:.4f}")
+    print(f"overall bwd percent_correct: {all_bwd_acc[0]:.4f}")
+
+    return all_fwd_acc[0], all_bwd_acc[0]
+
+
+from torchvision.models.feature_extraction import create_feature_extractor, get_graph_node_names
+
+@torch.no_grad()
+def two_way_identification(all_recons, all_images, model, preprocess, feature_layer=None, return_avg=True):
+    preds = model(torch.stack([preprocess(recon) for recon in all_recons], dim=0).to(device))
+    reals = model(torch.stack([preprocess(indiv) for indiv in all_images], dim=0).to(device))
+    if feature_layer is None:
+        preds = preds.float().flatten(1).cpu().numpy()
+        reals = reals.float().flatten(1).cpu().numpy()
+    else:
+        preds = preds[feature_layer].float().flatten(1).cpu().numpy()
+        reals = reals[feature_layer].float().flatten(1).cpu().numpy()
+
+    r = np.corrcoef(reals, preds)
+    r = r[:len(all_images), len(all_images):]
+    congruents = np.diag(r)
+
+    success = r < congruents
+    success_cnt = np.sum(success, 0)
+
+    if return_avg:
+        perf = np.mean(success_cnt) / (len(all_images)-1)
+        return perf
+    else:
+        return success_cnt, len(all_images)-1
+    
+def calculate_pixcorr(all_recons, all_images):
+    preprocess = transforms.Compose([
+        transforms.Resize(425, interpolation=transforms.InterpolationMode.BILINEAR),
+    ])
+
+    # Flatten images while keeping the batch dimension
+    all_images_flattened = preprocess(all_images).reshape(len(all_images), -1).cpu()
+    all_recons_flattened = preprocess(all_recons).reshape(len(all_recons), -1).cpu()
+
+    print(all_images_flattened.shape)
+    print(all_recons_flattened.shape)
+
+    corr_stack = []
+
+    corrsum = 0
+    for i in tqdm(range(len(all_images))):
+        corrcoef = np.corrcoef(all_images_flattened[i], all_recons_flattened[i])[0][1]
+        if np.isnan(corrcoef):
+            print("WARNING: CORRCOEF WAS NAN")
+            corrcoef = 0
+        corrsum += corrcoef
+        corr_stack.append(corrcoef)
+    corrmean = corrsum / len(all_images)
+
+    pixcorr = corrmean
+    print(f"Pixel Correlation: {pixcorr}")
+    return pixcorr
+
+from skimage.color import rgb2gray
+from skimage.metrics import structural_similarity as ssim
+
+def calculate_ssim(all_recons, all_images):
+    preprocess = transforms.Compose([
+        transforms.Resize(425, interpolation=transforms.InterpolationMode.BILINEAR), 
+    ])
+
+    # convert image to grayscale with rgb2grey
+    img_gray = rgb2gray(preprocess(all_images).permute((0,2,3,1)).cpu())
+    recon_gray = rgb2gray(preprocess(all_recons).permute((0,2,3,1)).cpu())
+    print("converted, now calculating ssim...")
+
+    ssim_score=[]
+    for im,rec in tqdm(zip(img_gray,recon_gray),total=len(all_images)):
+        ssim_score.append(ssim(rec, im, multichannel=True, gaussian_weights=True, sigma=1.5, use_sample_covariance=False, data_range=1.0))
+
+    ssim_ = np.mean(ssim_score)
+    print(f"SSIM: {ssim_}")
+    return ssim_
+
+from torchvision.models import alexnet, AlexNet_Weights
+def calculate_alexnet(all_recons, all_images, layers = [2, 5]):
+    print("Loading AlexNet")
+    alex_weights = AlexNet_Weights.DEFAULT
+    alex_model = create_feature_extractor(alexnet(weights=alex_weights), return_nodes=['features.4','features.11']).to(device)
+    alex_model.eval().requires_grad_(False).to(device)
+
+    # see alex_weights.transforms()
+    preprocess = transforms.Compose([
+        transforms.Resize(256, interpolation=transforms.InterpolationMode.BILINEAR),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                            std=[0.229, 0.224, 0.225]),
+    ])
+
+    alexnet2 = None
+    alexnet5 = None
+    if 2 in layers:
+        layer = 'early, AlexNet(2)'
+        print(f"\n---{layer}---")
+        all_per_correct = two_way_identification(all_recons, all_images, 
+                                                            alex_model, preprocess, 'features.4')
+        alexnet2 = np.mean(all_per_correct)
+        print(f"2-way Percent Correct (early AlexNet): {alexnet2:.4f}")
+
+    if 5 in layers:
+        layer = 'mid, AlexNet(5)'
+        print(f"\n---{layer}---")
+        all_per_correct = two_way_identification(all_recons, all_images, 
+                                                            alex_model, preprocess, 'features.11')
+        alexnet5 = np.mean(all_per_correct)
+        print(f"2-way Percent Correct (mid AlexNet): {alexnet5:.4f}")
+
+    return alexnet2, alexnet5
+
+
+from torchvision.models import inception_v3, Inception_V3_Weights
+def calculate_inception_v3(all_recons, all_images):
+    print("Loading Inception V3")
+    weights = Inception_V3_Weights.DEFAULT
+    inception_model = create_feature_extractor(inception_v3(weights=weights), 
+                                            return_nodes=['avgpool']).to(device)
+    inception_model.eval().requires_grad_(False).to(device)
+
+    # see weights.transforms()
+    preprocess = transforms.Compose([
+        transforms.Resize(342, interpolation=transforms.InterpolationMode.BILINEAR),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                            std=[0.229, 0.224, 0.225]),
+    ])
+
+    all_per_correct = two_way_identification(all_recons, all_images,
+                                            inception_model, preprocess, 'avgpool')
+            
+    inception = np.mean(all_per_correct)
+    print(f"2-way Percent Correct (Inception V3): {inception:.4f}")
+
+    return inception
+
+
+import clip as clip_torch
+def calculate_clip(all_recons, all_images):
+    print("Loading CLIP")
+    clip_model, preprocess = clip_torch.load("ViT-L/14", device=device)
+
+    preprocess = transforms.Compose([
+        transforms.Resize(224, interpolation=transforms.InterpolationMode.BILINEAR),
+        transforms.Normalize(mean=[0.48145466, 0.4578275, 0.40821073],
+                            std=[0.26862954, 0.26130258, 0.27577711]),
+    ])
+
+    all_per_correct = two_way_identification(all_recons, all_images,
+                                            clip_model.encode_image, preprocess, None) # final layer
+    clip_ = np.mean(all_per_correct)
+    print(f"2-way Percent Correct (CLIP): {clip_:.4f}")
+
+    return clip_
+
+import scipy as sp
+from torchvision.models import efficientnet_b1, EfficientNet_B1_Weights
+def calculate_efficientnet_b1(all_recons, all_images):
+    print("Loading EfficientNet B1")
+    weights = EfficientNet_B1_Weights.DEFAULT
+    eff_model = create_feature_extractor(efficientnet_b1(weights=weights), 
+                                        return_nodes=['avgpool'])
+    eff_model.eval().requires_grad_(False).to(device)
+
+    # see weights.transforms()
+    preprocess = transforms.Compose([
+        transforms.Resize(255, interpolation=transforms.InterpolationMode.BILINEAR),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                            std=[0.229, 0.224, 0.225]),
+    ])
+
+    gt = eff_model(preprocess(all_images))['avgpool']
+    gt = gt.reshape(len(gt),-1).cpu().numpy()
+    fake = eff_model(preprocess(all_recons))['avgpool']
+    fake = fake.reshape(len(fake),-1).cpu().numpy()
+
+    effnet_nomean = np.array([sp.spatial.distance.correlation(gt[i],fake[i]) for i in range(len(gt))])
+    effnet = effnet_nomean.mean()
+    print("Distance EfficientNet B1:",effnet)
+
+    return effnet
+
+def calculate_swav(all_recons, all_images):
+    print("Loading SwAV")
+    swav_model = torch.hub.load('facebookresearch/swav:main', 'resnet50')
+    swav_model = create_feature_extractor(swav_model, 
+                                        return_nodes=['avgpool'])
+    swav_model.eval().requires_grad_(False).to(device)
+
+    preprocess = transforms.Compose([
+        transforms.Resize(224, interpolation=transforms.InterpolationMode.BILINEAR),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                            std=[0.229, 0.224, 0.225]),
+    ])
+
+    gt = swav_model(preprocess(all_images))['avgpool']
+    gt = gt.reshape(len(gt),-1).cpu().numpy()
+    fake = swav_model(preprocess(all_recons))['avgpool']
+    fake = fake.reshape(len(fake),-1).cpu().numpy()
+
+    swav_nomean = np.array([sp.spatial.distance.correlation(gt[i],fake[i]) for i in range(len(gt))])
+    swav = swav_nomean.mean()
+    print("Distance SwAV:",swav)
+
+    return swav
+
+def deduplicate_tensors(all_clipvoxels_save_tensor, all_ground_truth_save_tensor):
+    """
+    Remove duplicate images in the ground truth and average the corresponding voxel embeddings.
+    
+    Arguments:
+        all_clipvoxels_save_tensor (torch.Tensor): tensor of shape (N, 1, 256, 1664) containing voxel predictions.
+        all_ground_truth_save_tensor (torch.Tensor): tensor of shape (N, 3, 224, 224) containing images.
+        
+    Returns:
+        new_voxels (torch.Tensor): deduplicated voxels tensor with averaged embeddings, shape (M, 1, 256, 1664),
+                                   where M is the number of unique images.
+        new_ground_truth (torch.Tensor): deduplicated ground truth images tensor, shape (M, 3, 224, 224).
+        duplicate_pairs (list of tuples): list of tuples (i, j) where image at index j was found to be 
+                                          a duplicate of image at index i.
+    """
+    # Number of samples
+    num_samples = all_ground_truth_save_tensor.shape[0]
+    
+    unique_indices = []  # Stores the indices of first occurrences of unique images
+    duplicate_groups = {}  # Map each unique index -> list of all indices (including the primary) that are identical
+    duplicate_pairs = []  # List to store (primary, duplicate) pairs
+
+    # Loop over all images in the ground truth tensor
+    for i in range(num_samples):
+        current_img = all_ground_truth_save_tensor[i]
+        # flag to detect whether the current image has a duplicate already
+        found_duplicate = False
+        for unique_idx in unique_indices:
+            if torch.equal(current_img, all_ground_truth_save_tensor[unique_idx]):
+                # Duplicate found: record the pair and add current index to the duplicate group
+                duplicate_pairs.append((unique_idx, i))
+                duplicate_groups[unique_idx].append(i)
+                found_duplicate = True
+                break
+        if not found_duplicate:
+            # New image; mark as unique and initialize its duplicate group list
+            unique_indices.append(i)
+            duplicate_groups[i] = [i]
+    
+    # Build new tensors
+    dedup_ground_truth_list = []
+    dedup_voxels_list = []
+    
+    for unique_idx in unique_indices:
+        # For ground truth, we keep the primary image (the first occurrence)
+        dedup_ground_truth_list.append(all_ground_truth_save_tensor[unique_idx])
+        
+        # For voxels, average the voxels over all indices in this duplicate group
+        indices = duplicate_groups[unique_idx]
+        voxels_group = all_clipvoxels_save_tensor[indices]  # shape: (n_group, 1, 256, 1664)
+        averaged_voxels = voxels_group.mean(dim=0)
+        dedup_voxels_list.append(averaged_voxels)
+    
+    # Stack lists into tensors along the first dimension
+    new_ground_truth = torch.stack(dedup_ground_truth_list, dim=0)
+    new_voxels = torch.stack(dedup_voxels_list, dim=0)
+    
+    return new_voxels, new_ground_truth, duplicate_pairs
