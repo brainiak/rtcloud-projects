@@ -324,6 +324,136 @@ def ddp(model):
     return model
 
 
+def process_design(filename):
+    """
+    Process design CSV file and extract relevant trial information
+    
+    Args:
+        filename: Path to CSV file containing design information
+    
+    Returns:
+        data: Pandas DataFrame containing all design information
+        starts: Array of trial start times
+        images: Array of image names
+        is_new_run: Array of boolean flags indicating new runs
+        image_names: Array of image names
+    """
+    import pandas as pd
+    data = pd.read_csv(filename)
+    data = data.dropna(subset=['current_image'])  # there are nans (blank cells) between runs
+    starts = data['trial.started'].values[10:]
+    images = data['current_image'].values[10:]
+    is_new_run = data['is_new_run'].values[10:]
+    image_names = data['current_image'].values[10:]
+    return data, starts, images, is_new_run, image_names
+
+
+def load_design_files(sub, session, func_task_name, designdir, design_ses_list=None):
+    """
+    Load design files for a given subject and session
+    
+    Args:
+        sub: str, subject ID (e.g., 'sub-001')
+        session: str, session ID (e.g., 'ses-01' or 'all')
+        func_task_name: str, task name (e.g., 'A', 'B', 'C')
+        designdir: str, path to design directory
+        design_ses_list: list, list of sessions to process when session='all'
+    
+    Returns:
+        tuple containing:
+        - data: pandas DataFrame with design information
+        - starts: array of trial start times
+        - images: array of image names
+        - is_new_run: array of boolean flags for new runs
+        - image_names: array of image names
+        - unique_images: array of unique image names
+        - len_unique_images: int, number of unique images
+    """
+    import pandas as pd
+    if (sub=='sub-001' and session=='ses-01') or (sub=='sub-002' and session=='ses-01'):
+        filename = f"{designdir}/csv/{sub}_{session}.csv"
+        data = pd.read_csv(filename)
+        images = data['current_image'].values[23:]
+        starts = data['trial.started'].values[23:]
+        is_new_run = data['is_new_run'].values[23:]
+        image_names = data['current_image'].values[23:]
+        
+    elif (sub=='sub-001' and session in ('ses-02', 'ses-03', 'ses-04', 'ses-05')) or \
+         (sub=='sub-002' and session in ('ses-02')) or sub=='sub-003' or \
+         (sub=='sub-004' and session in ('ses-01', 'ses-02')) or \
+         (sub=='sub-005' and session in ('ses-01', 'ses-02', 'ses-03')) or \
+         (sub=='sub-006' and session in ('ses-01')):
+        
+        if (sub=='sub-001' and session in ('ses-05')):
+            if func_task_name == 'A':
+                filename = f"{designdir}/csv/{sub}_ses-05.csv"
+            elif func_task_name == 'B':
+                filename = f"{designdir}/csv/{sub}_ses-06.csv"
+            elif func_task_name == 'C':
+                filename = f"{designdir}/csv/{sub}_ses-07.csv"
+
+        elif (sub=='sub-002' and session in ('ses-02')):
+            if func_task_name == 'A':
+                filename = f"{designdir}/csv/{sub}_ses-06.csv"
+            elif func_task_name == 'B':
+                filename = f"{designdir}/csv/{sub}_ses-07.csv"
+            elif func_task_name == 'C':
+                filename = f"{designdir}/csv/{sub}_ses-05.csv"
+        
+        elif (sub=='sub-004' and session in ('ses-01')):
+            if func_task_name == 'A':
+                filename = f"{designdir}/csv/{sub}_ses-07.csv"
+            elif func_task_name == 'B':
+                filename = f"{designdir}/csv/{sub}_ses-05.csv"
+            elif func_task_name == 'C':
+                filename = f"{designdir}/csv/{sub}_ses-06.csv"
+        elif (sub=='sub-004' and session in ('ses-02')):
+            assert func_task_name == 'C'
+            filename = f"{designdir}/csv/{sub}_ses-08.csv"
+
+        elif (sub=='sub-005' and session in ('ses-01', 'ses-02', 'ses-03')) or sub=='sub-006' and session in ('ses-01'):
+            filename = f"{designdir}/csv/{sub}_{session}.csv"
+        
+        data, starts, images, is_new_run, image_names = process_design(filename)
+        print(f"Data shape: {data.shape}")
+
+    elif sub in ('sub-001', 'sub-004', 'sub-005') and session == 'all':
+        assert design_ses_list is not None, "design_ses_list must be provided when session='all'"
+
+        data_list = []
+        starts_list = []
+        images_list = []
+        is_new_run_list = []
+        image_names_list = []
+
+        for ses in design_ses_list:
+            filename = f"{designdir}/csv/{sub}_{ses}.csv"
+            print(f"Loading: {filename}")
+
+            data_tmp, starts_tmp, images_tmp, is_new_run_tmp, image_names_tmp = process_design(filename)
+
+            data_list.append(data_tmp)
+            starts_list.append(starts_tmp)
+            images_list.append(images_tmp)
+            is_new_run_list.append(is_new_run_tmp)
+            image_names_list.append(image_names_tmp)
+        # Concatenate all lists
+        data = pd.concat(data_list, ignore_index=True)
+        starts = np.concatenate(starts_list)
+        images = np.concatenate(images_list)
+        is_new_run = np.concatenate(is_new_run_list)
+        image_names = np.concatenate(image_names_list)
+    else:
+        raise Exception("undefined subject and/or session")
+
+    print(f"Using design file: {filename}")
+    
+    unique_images = np.unique(images.astype(str))
+    len_unique_images = len(unique_images)
+    print('Total number of images:', len(images))
+    print("Number of unique images:", len_unique_images)
+    
+    return data, starts, images, is_new_run, image_names, unique_images, len_unique_images
 
 
 
