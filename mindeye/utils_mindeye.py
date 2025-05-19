@@ -789,3 +789,84 @@ def deduplicate_tensors(all_clipvoxels_save_tensor, all_ground_truth_save_tensor
     new_voxels = torch.stack(dedup_voxels_list, dim=0)
     
     return new_voxels, new_ground_truth, duplicate_pairs
+
+
+def find_paired_indices(x):
+    unique_elements, counts = torch.unique(x, return_counts=True)
+    repeated_elements = unique_elements[counts > 1]
+    paired_indices = []
+    
+    for element in repeated_elements:
+        indices = (x == element).nonzero(as_tuple=True)[0]
+        # Instead of creating pairs, just collect the entire set of indices once
+        paired_indices.append(indices[:len(indices)].tolist())
+    
+    return paired_indices
+
+
+def process_images(image_names, unique_images, remove_close_to_MST=False, remove_random_n=False, imgs_to_remove=None, sub=None, session=None):
+    import re
+    image_idx = np.array([])
+    vox_image_names = np.array([])
+    all_MST_images = {}
+    
+    for i, im in enumerate(image_names):
+        if im == "blank.jpg" or str(im) == "nan":
+            continue
+                
+        if remove_close_to_MST and "closest_pairs" in im:
+            continue
+        
+        if remove_random_n and im in imgs_to_remove:
+            continue
+            
+        vox_image_names = np.append(vox_image_names, im)
+        image_idx_ = np.where(im == unique_images)[0].item()
+        image_idx = np.append(image_idx, image_idx_)
+        
+        if sub == 'ses-01' and session in ('ses-01', 'ses-04'):
+            if ('w_' in im or 'paired_image_' in im or re.match(r'all_stimuli/rtmindeye_stimuli/\d{1,2}_\d{1,3}\.png$', im) 
+                or re.match(r'images/\d{1,2}_\d{1,3}\.png$', im)):
+                all_MST_images[i] = im
+        elif 'MST' in im:
+            all_MST_images[i] = im
+    
+    image_idx = torch.Tensor(image_idx).long()
+    unique_MST_images = np.unique(list(all_MST_images.values()))
+    
+    MST_ID = np.array([], dtype=int)
+    if remove_close_to_MST:
+        close_to_MST_idx = np.array([], dtype=int)
+    if remove_random_n:
+        random_n_idx = np.array([], dtype=int)
+    
+    vox_idx = np.array([], dtype=int)
+    j = 0  # Counter for indexing vox based on removed images
+    
+    for i, im in enumerate(image_names):
+        if im == "blank.jpg" or str(im) == "nan":
+            continue
+        
+        if remove_close_to_MST and "closest_pairs" in im:
+            close_to_MST_idx = np.append(close_to_MST_idx, i)
+            continue
+        
+        if remove_random_n and im in imgs_to_remove:
+            vox_idx = np.append(vox_idx, j)
+            j += 1
+            continue
+        
+        j += 1
+        curr = np.where(im == unique_MST_images)
+        
+        if curr[0].size == 0:
+            MST_ID = np.append(MST_ID, len(unique_MST_images))  # Out of range index for filtering later
+        else:
+            MST_ID = np.append(MST_ID, curr)
+    
+    assert len(MST_ID) == len(image_idx)
+    
+    pairs = find_paired_indices(image_idx)
+    pairs = sorted(pairs, key=lambda x: x[0])
+    
+    return image_idx, vox_image_names, pairs
