@@ -870,3 +870,13 @@ def process_images(image_names, unique_images, remove_close_to_MST=False, remove
     pairs = sorted(pairs, key=lambda x: x[0])
     
     return image_idx, vox_image_names, pairs
+
+
+def zscore(data,train_mean=None,train_std=None):
+    # assuming that first dim is num_samples and second dim is num_voxels
+    if train_mean is None:
+        train_mean = np.mean(data,axis=0)
+    if train_std is None:
+        train_std = np.std(data,axis=0)
+    zscored_data = (data - train_mean) / (train_std + 1e-6)
+    return zscored_data
