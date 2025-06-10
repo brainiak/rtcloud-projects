@@ -456,6 +456,48 @@ def load_design_files(sub, session, func_task_name, designdir, design_ses_list=N
     return data, starts, images, is_new_run, image_names, unique_images, len_unique_images
 
 
+def create_design_matrix(images, starts, is_new_run, unique_images, n_runs, n_trs, len_unique_images, interval):
+    """
+    Create a design matrix for GLMsingle analysis
+    
+    Args:
+        images: List of image filenames
+        starts: List of trial start times
+        is_new_run: List of boolean flags indicating if trial is last in run
+        unique_images: List of unique image filenames
+        n_runs: Number of runs
+        n_trs: Number of TRs per run
+        len_unique_images: Length of unique_images list
+    
+    Returns:
+        design: List of design matrices, one per run
+    """
+    design = [np.zeros((n_trs, len_unique_images)) for _ in range(n_runs)]
+    starting_time = starts[0]
+    cur_run = 0
+    first_trial_of_new_run = False
+    
+    for i in range(len(images)):
+        if first_trial_of_new_run: # is the first trial of a new run?
+            starting_time = starts[i]
+            cur_run += 1
+            first_trial_of_new_run = False
+            
+        if is_new_run[i] == 1: # is this the last trial of the run?
+            first_trial_of_new_run = True
+            if n_runs == 1:
+                break
+        
+        if images[i] == "blank.jpg":
+            continue
+    
+        image_idx = np.where(str(images[i])==unique_images)[0].item()
+        timepoint = int(np.round((starts[i] - starting_time) / interval))
+        
+        design[cur_run][timepoint, image_idx] = 1
+            
+    return design
+
 
 #########################################################
 ####### Evaluation utils
