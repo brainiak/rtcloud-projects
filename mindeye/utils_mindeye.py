@@ -922,3 +922,47 @@ def zscore(data,train_mean=None,train_std=None):
         train_std = np.std(data,axis=0)
     zscored_data = (data - train_mean) / (train_std + 1e-6)
     return zscored_data
+
+
+def vectorized_pearsonr(X, Y):
+    """
+    Calculates Pearson correlation coefficients and p-values for multiple pairs of arrays.
+
+    Args:
+        X (numpy.ndarray): A 2D array where each row represents a variable.
+        Y (numpy.ndarray): A 2D array where each row represents a variable.
+                           Must have the same number of columns as X.
+
+    Returns:
+        tuple: A tuple containing two NumPy arrays:
+            - Pearson correlation coefficients (r values).
+            - p-values.
+    """
+    if X.shape[1] != Y.shape[1]:
+        raise ValueError("X and Y must have the same number of columns")
+
+    X_mean = np.mean(X, axis=0, keepdims=True)
+    Y_mean = np.mean(Y, axis=0, keepdims=True)
+
+    X_centered = X - X_mean
+    Y_centered = Y - Y_mean
+
+    numerator = np.sum(X_centered * Y_centered, axis=1)
+
+    denominator = np.sqrt(np.sum(X_centered**2, axis=1) * np.sum(Y_centered**2, axis=1))
+
+    r = numerator / denominator
+    
+    n = X.shape[1]
+    
+    #handle potential division by zero
+    r = np.where(denominator == 0, 0, r)
+
+    # Calculate p-values using the t-distribution
+    t_stat = r * np.sqrt((n - 2) / (1 - r**2))
+    p = 2 * (1 - stats.t.cdf(np.abs(t_stat), n - 2))
+    
+    # Handle cases where r is NaN due to division by zero
+    p = np.where(np.isnan(p), 1.0, p)
+
+    return r, p
