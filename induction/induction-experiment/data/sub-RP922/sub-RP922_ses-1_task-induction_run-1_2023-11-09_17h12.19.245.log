@@ -1,0 +1,103 @@
+1.2606 	WARNING 	We strongly recommend you activate the PTB sound engine in PsychoPy prefs as the preferred audio engine. Its timing is vastly superior. Your prefs are currently set to use ['sounddevice', 'PTB', 'pyo', 'pygame'] (in that order).
+10.4127 	WARNING 	Couldn't measure a consistent frame rate!
+  - Is your graphics card set to sync to vertical blank?
+  - Are you running other processes on your computer?
+
+10.4133 	EXP 	Created window1 = Window(allowGUI=True, allowStencil=False, autoLog=True, backendConf=UNKNOWN, bitsMode=UNKNOWN, blendMode='avg', bpc=(8, 8, 8), color=array([-1., -1., -1.]), colorSpace='rgb', depthBits=8, fullscr=<method-wrapper '__getattribute__' of attributeSetter object at 0x7fc658b9ab80>, gamma=None, gammaErrorPolicy='raise', lms=UNKNOWN, monitor=<psychopy.monitors.calibTools.Monitor object at 0x7fc65d60ee50>, multiSample=False, name='window1', numSamples=2, pos=[480.0, 270.0], screen=0, size=array([3840, 2160]), stencilBits=0, stereo=False, units='pix', useFBO=True, useRetina=True, viewOri=0.0, viewPos=None, viewScale=None, waitBlanking=True, winType='pyglet')
+10.4134 	EXP 	window1: mouseVisible = True
+10.4140 	EXP 	window1: mouseVisible = False
+10.4141 	EXP 	window1: Attempting to measure frame rate of screen (0) ...
+10.4141 	EXP 	window1: recordFrameIntervals = False
+10.4944 	EXP 	window1: recordFrameIntervals = True
+11.4072 	WARNING 	Couldn't measure a consistent frame rate!
+  - Is your graphics card set to sync to vertical blank?
+  - Are you running other processes on your computer?
+
+12.7781 	EXP 	Created instructions_text = TextStim(__class__=<class 'psychopy.visual.text.TextStim'>, alignHoriz=method-wrapper(...), alignText='center', alignVert=method-wrapper(...), anchorHoriz='center', anchorVert='center', antialias=True, autoDraw=False, autoLog=True, bold=False, color=array([1, 1, 1]), colorSpace='rgb', contrast=1.0, depth=0.0, flipHoriz=False, flipVert=False, font='Open Sans', fontFiles=[], height=30.0, italic=False, languageStyle='LTR', name='instructions_text', opacity=1.0, ori=0.0, pos=array([0., 0.]), rgb=UNKNOWN, text='Try to score as many points as you can!', units='pix', win=Window(...), wrapWidth=500)
+13.0241 	EXP 	Created fixation_6 = ShapeStim(__class__=<class 'psychopy.visual.shape.ShapeStim'>, anchor=('center', 'center'), autoDraw=False, autoLog=True, closeShape=True, color=method-wrapper(...), colorSpace='rgb', contrast=None, depth=0.0, fillColor=array([1, 1, 1]), fillColorSpace='rgb', fillRGB=array([1, 1, 1]), interpolate=True, lineColor=array([1, 1, 1]), lineColorSpace='rgb', lineRGB=array([1, 1, 1]), lineWidth=0.0, name='fixation_6', opacity=1.0, ori=0.0, pos=array([0., 0.]), size=array([20., 20.]), units='pix', vertices=ndarray(...), win=Window(...), windingRule=None)
+13.0269 	EXP 	Created fixation_3 = ShapeStim(__class__=<class 'psychopy.visual.shape.ShapeStim'>, anchor=('center', 'center'), autoDraw=False, autoLog=True, closeShape=True, color=method-wrapper(...), colorSpace='rgb', contrast=None, depth=-1.0, fillColor=array([1, 1, 1]), fillColorSpace='rgb', fillRGB=array([1, 1, 1]), interpolate=True, lineColor=array([1, 1, 1]), lineColorSpace='rgb', lineRGB=array([1, 1, 1]), lineWidth=0.0, name='fixation_3', opacity=1.0, ori=0.0, pos=array([0., 0.]), size=array([20., 20.]), units='pix', vertices=ndarray(...), win=Window(...), windingRule=None)
+13.0298 	EXP 	Created feedback_circle_3 = ShapeStim(__class__=<class 'psychopy.visual.shape.ShapeStim'>, anchor=('center', 'center'), autoDraw=False, autoLog=True, closeShape=True, color=method-wrapper(...), colorSpace='rgb', contrast=None, depth=0.0, fillColor=array([1, 1, 1]), fillColorSpace='rgb', fillRGB=array([1, 1, 1]), interpolate=True, lineColor=array([1, 1, 1]), lineColorSpace='rgb', lineRGB=array([1, 1, 1]), lineWidth=0.0, name='feedback_circle_3', opacity=1.0, ori=0.0, pos=array([0., 0.]), size=array([1., 1.]), units='pix', vertices=ndarray(...), win=Window(...), windingRule=None)
+13.0325 	EXP 	Created fixation_4 = ShapeStim(__class__=<class 'psychopy.visual.shape.ShapeStim'>, anchor=('center', 'center'), autoDraw=False, autoLog=True, closeShape=True, color=method-wrapper(...), colorSpace='rgb', contrast=None, depth=-1.0, fillColor=array([1, 1, 1]), fillColorSpace='rgb', fillRGB=array([1, 1, 1]), interpolate=True, lineColor=array([1, 1, 1]), lineColorSpace='rgb', lineRGB=array([1, 1, 1]), lineWidth=0.0, name='fixation_4', opacity=1.0, ori=0.0, pos=array([0., 0.]), size=array([20., 20.]), units='pix', vertices=ndarray(...), win=Window(...), windingRule=None)
+13.0354 	EXP 	Created fixation_5 = ShapeStim(__class__=<class 'psychopy.visual.shape.ShapeStim'>, anchor=('center', 'center'), autoDraw=False, autoLog=True, closeShape=True, color=method-wrapper(...), colorSpace='rgb', contrast=None, depth=0.0, fillColor=array([1, 1, 1]), fillColorSpace='rgb', fillRGB=array([1, 1, 1]), interpolate=True, lineColor=array([1, 1, 1]), lineColorSpace='rgb', lineRGB=array([1, 1, 1]), lineWidth=0.0, name='fixation_5', opacity=1.0, ori=0.0, pos=array([0., 0.]), size=array([20., 20.]), units='pix', vertices=ndarray(...), win=Window(...), windingRule=None)
+13.0382 	EXP 	Created text_2 = TextStim(__class__=<class 'psychopy.visual.text.TextStim'>, alignHoriz=method-wrapper(...), alignText='center', alignVert=method-wrapper(...), anchorHoriz='center', anchorVert='center', antialias=True, autoDraw=False, autoLog=True, bold=False, color=array([1, 1, 1]), colorSpace='rgb', contrast=1.0, depth=-1.0, flipHoriz=False, flipVert=False, font='Open Sans', fontFiles=[], height=30.0, italic=False, languageStyle='LTR', name='text_2', opacity=1.0, ori=0.0, pos=array([  8., -32.]), rgb=UNKNOWN, text='scoring...', units='pix', win=Window(...), wrapWidth=500)
+13.0395 	EXP 	Created text = TextStim(__class__=<class 'psychopy.visual.text.TextStim'>, alignHoriz=method-wrapper(...), alignText='center', alignVert=method-wrapper(...), anchorHoriz='center', anchorVert='center', antialias=True, autoDraw=False, autoLog=True, bold=False, color=array([1, 1, 1]), colorSpace='rgb', contrast=1.0, depth=-1.0, flipHoriz=False, flipVert=False, font='Open Sans', fontFiles=[], height=30.0, italic=False, languageStyle='LTR', name='text', opacity=1.0, ori=0.0, pos=array([  8., -32.]), rgb=UNKNOWN, text='scoring...', units='pix', win=Window(...), wrapWidth=500)
+13.0425 	EXP 	Created fixation_8 = ShapeStim(__class__=<class 'psychopy.visual.shape.ShapeStim'>, anchor=('center', 'center'), autoDraw=False, autoLog=True, closeShape=True, color=method-wrapper(...), colorSpace='rgb', contrast=None, depth=-2.0, fillColor=array([1, 1, 1]), fillColorSpace='rgb', fillRGB=array([1, 1, 1]), interpolate=True, lineColor=array([1, 1, 1]), lineColorSpace='rgb', lineRGB=array([1, 1, 1]), lineWidth=0.0, name='fixation_8', opacity=1.0, ori=0.0, pos=array([0., 0.]), size=array([20., 20.]), units='pix', vertices=ndarray(...), win=Window(...), windingRule=None)
+13.0454 	EXP 	Created zero_circle = ShapeStim(__class__=<class 'psychopy.visual.shape.ShapeStim'>, anchor=('center', 'center'), autoDraw=False, autoLog=True, closeShape=True, color=method-wrapper(...), colorSpace='rgb', contrast=None, depth=-1.0, fillColor=array([0, 0, 0]), fillColorSpace='rgb', fillRGB=array([0, 0, 0]), interpolate=True, lineColor=array([1, 1, 1]), lineColorSpace='rgb', lineRGB=array([1, 1, 1]), lineWidth=8.0, name='zero_circle', opacity=0.4, ori=0.0, pos=array([0., 0.]), size=array([400., 400.]), units='pix', vertices=ndarray(...), win=Window(...), windingRule=None)
+13.0482 	EXP 	Created outer_circle = ShapeStim(__class__=<class 'psychopy.visual.shape.ShapeStim'>, anchor=('center', 'center'), autoDraw=False, autoLog=True, closeShape=True, color=method-wrapper(...), colorSpace='rgb', contrast=None, depth=-2.0, fillColor=array([0, 0, 0]), fillColorSpace='rgb', fillRGB=array([0, 0, 0]), interpolate=True, lineColor=array([1, 1, 1]), lineColorSpace='rgb', lineRGB=array([1, 1, 1]), lineWidth=8.0, name='outer_circle', opacity=0.4, ori=0.0, pos=array([0., 0.]), size=array([600., 600.]), units='pix', vertices=ndarray(...), win=Window(...), windingRule=None)
+13.0509 	EXP 	Created feedback_circle = ShapeStim(__class__=<class 'psychopy.visual.shape.ShapeStim'>, anchor=('center', 'center'), autoDraw=False, autoLog=True, closeShape=True, color=method-wrapper(...), colorSpace='rgb', contrast=None, depth=-3.0, fillColor=array([1, 1, 1]), fillColorSpace='rgb', fillRGB=array([1, 1, 1]), interpolate=True, lineColor=array([1, 1, 1]), lineColorSpace='rgb', lineRGB=array([1, 1, 1]), lineWidth=0.0, name='feedback_circle', opacity=1.0, ori=0.0, pos=array([0., 0.]), size=array([1., 1.]), units='pix', vertices=ndarray(...), win=Window(...), windingRule=None)
+13.0537 	EXP 	Created fixation = ShapeStim(__class__=<class 'psychopy.visual.shape.ShapeStim'>, anchor=('center', 'center'), autoDraw=False, autoLog=True, closeShape=True, color=method-wrapper(...), colorSpace='rgb', contrast=None, depth=-4.0, fillColor=array([1, 1, 1]), fillColorSpace='rgb', fillRGB=array([1, 1, 1]), interpolate=True, lineColor=array([1, 1, 1]), lineColorSpace='rgb', lineRGB=array([1, 1, 1]), lineWidth=0.0, name='fixation', opacity=1.0, ori=0.0, pos=array([0., 0.]), size=array([20., 20.]), units='pix', vertices=ndarray(...), win=Window(...), windingRule=None)
+13.0566 	EXP 	Created fixation_7 = ShapeStim(__class__=<class 'psychopy.visual.shape.ShapeStim'>, anchor=('center', 'center'), autoDraw=False, autoLog=True, closeShape=True, color=method-wrapper(...), colorSpace='rgb', contrast=None, depth=0.0, fillColor=array([1, 1, 1]), fillColorSpace='rgb', fillRGB=array([1, 1, 1]), interpolate=True, lineColor=array([1, 1, 1]), lineColorSpace='rgb', lineRGB=array([1, 1, 1]), lineWidth=0.0, name='fixation_7', opacity=1.0, ori=0.0, pos=array([0., 0.]), size=array([20., 20.]), units='pix', vertices=ndarray(...), win=Window(...), windingRule=None)
+13.0569 	EXP 	Created end_screen_text = TextStim(__class__=<class 'psychopy.visual.text.TextStim'>, alignHoriz=method-wrapper(...), alignText='center', alignVert=method-wrapper(...), anchorHoriz='center', anchorVert='center', antialias=True, autoDraw=False, autoLog=True, bold=False, color=array([1, 1, 1]), colorSpace='rgb', contrast=1.0, depth=0.0, flipHoriz=False, flipVert=False, font='Open Sans', fontFiles=[], height=30.0, italic=False, languageStyle='LTR', name='end_screen_text', opacity=1.0, ori=0.0, pos=array([0., 0.]), rgb=UNKNOWN, text='', units='pix', win=Window(...), wrapWidth=500)
+13.3020 	WARNING 	t of last frame was 1894.94ms (=1/0)
+13.3020 	EXP 	instructions_text: autoDraw = True
+21.8467 	WARNING 	t of last frame was 20.51ms (=1/48)
+22.7285 	DATA 	Keypress: space
+22.7322 	EXP 	instructions_text: autoDraw = False
+22.7322 	EXP 	fixation_6: autoDraw = True
+24.3346 	WARNING 	t of last frame was 24.79ms (=1/40)
+34.3347 	WARNING 	t of last frame was 22.66ms (=1/44)
+38.3172 	WARNING 	Multiple dropped frames have occurred - I'll stop bothering you about them!
+82.7249 	EXP 	Imported data/sub-RP922/inputs/sub-RP922_ses-1_task-feedback_run-1_events.csv as conditions, 18 conditions, 13 params
+82.7255 	EXP 	Created sequence: sequential, trialTypes=18, nReps=1, seed=None
+82.7259 	EXP 	New trial (rep=0, index=0): OrderedDict([('trial_type', 'induction'), ('planned_onset', 68.0), ('duration', 6), ('iti_dur', 8), ('trial_num', 1), ('calculation_dur', 2), ('feedback_dur', 4), ('post_induction_dur', 6), ('subject', 922), ('ses', 1), ('task', 'feedback'), ('run', 1), ('onset', 68.0)])
+82.7462 	EXP 	fixation_6: autoDraw = False
+82.7462 	EXP 	fixation_6: autoDraw = False
+82.7462 	EXP 	fixation_3: autoDraw = True
+90.7493 	EXP 	fixation_3: autoDraw = False
+90.7493 	EXP 	feedback_circle_3: fillColor = <psychopy.colors.Color: (0.0, 0.0, 0.0, 1.0)>
+90.7493 	EXP 	feedback_circle_3: autoDraw = True
+90.7493 	EXP 	fixation_4: autoDraw = True
+96.7492 	EXP 	feedback_circle_3: autoDraw = False
+96.7492 	EXP 	fixation_4: autoDraw = False
+96.7492 	EXP 	fixation_5: autoDraw = True
+96.7492 	EXP 	text_2: autoDraw = True
+102.7489 	EXP 	fixation_5: autoDraw = False
+102.7489 	EXP 	text_2: autoDraw = False
+102.7489 	EXP 	text: autoDraw = True
+102.7489 	EXP 	fixation_8: autoDraw = True
+246.6955 	EXP 	text: autoDraw = False
+246.6955 	EXP 	fixation_8: autoDraw = False
+246.6955 	EXP 	zero_circle: borderColor = <psychopy.colors.Color: grey, alpha=1.0>
+246.6955 	EXP 	outer_circle: borderColor = <psychopy.colors.Color: grey, alpha=1.0>
+246.6955 	EXP 	feedback_circle: fillColor = <psychopy.colors.Color: grey, alpha=1.0>
+246.6955 	EXP 	zero_circle: autoDraw = True
+246.6955 	EXP 	outer_circle: autoDraw = True
+246.6955 	EXP 	feedback_circle: autoDraw = True
+246.6955 	EXP 	fixation: autoDraw = True
+250.6940 	EXP 	New trial (rep=0, index=1): OrderedDict([('trial_type', 'induction'), ('planned_onset', 92.0), ('duration', 6), ('iti_dur', 6), ('trial_num', 2), ('calculation_dur', 2), ('feedback_dur', 4), ('post_induction_dur', 6), ('subject', 922), ('ses', 1), ('task', 'feedback'), ('run', 1), ('onset', 92.0)])
+250.7097 	EXP 	zero_circle: autoDraw = False
+250.7097 	EXP 	outer_circle: autoDraw = False
+250.7097 	EXP 	feedback_circle: autoDraw = False
+250.7097 	EXP 	fixation: autoDraw = False
+250.7097 	EXP 	fixation_3: autoDraw = False
+250.7097 	EXP 	feedback_circle_3: fillColor = <psychopy.colors.Color: (0.0, 0.0, 0.0, 1.0)>
+250.7097 	EXP 	feedback_circle_3: autoDraw = False
+250.7097 	EXP 	fixation_4: autoDraw = False
+250.7097 	EXP 	fixation_5: autoDraw = False
+250.7097 	EXP 	text_2: autoDraw = False
+250.7097 	EXP 	text: autoDraw = True
+250.7097 	EXP 	fixation_8: autoDraw = True
+316.8539 	EXP 	text: autoDraw = False
+316.8539 	EXP 	fixation_8: autoDraw = False
+316.8539 	EXP 	zero_circle: borderColor = <psychopy.colors.Color: grey, alpha=1.0>
+316.8539 	EXP 	outer_circle: borderColor = <psychopy.colors.Color: grey, alpha=1.0>
+316.8539 	EXP 	feedback_circle: fillColor = <psychopy.colors.Color: grey, alpha=1.0>
+316.8539 	EXP 	zero_circle: autoDraw = True
+316.8539 	EXP 	outer_circle: autoDraw = True
+316.8539 	EXP 	feedback_circle: autoDraw = True
+316.8539 	EXP 	fixation: autoDraw = True
+320.8509 	EXP 	New trial (rep=0, index=2): OrderedDict([('trial_type', 'induction'), ('planned_onset', 120.0), ('duration', 6), ('iti_dur', 10), ('trial_num', 3), ('calculation_dur', 2), ('feedback_dur', 4), ('post_induction_dur', 6), ('subject', 922), ('ses', 1), ('task', 'feedback'), ('run', 1), ('onset', 120.0)])
+320.8652 	EXP 	zero_circle: autoDraw = False
+320.8652 	EXP 	outer_circle: autoDraw = False
+320.8652 	EXP 	feedback_circle: autoDraw = False
+320.8652 	EXP 	fixation: autoDraw = False
+320.8652 	EXP 	fixation_3: autoDraw = False
+320.8652 	EXP 	feedback_circle_3: fillColor = <psychopy.colors.Color: (0.0, 0.0, 0.0, 1.0)>
+320.8652 	EXP 	feedback_circle_3: autoDraw = False
+320.8652 	EXP 	fixation_4: autoDraw = False
+320.8652 	EXP 	fixation_5: autoDraw = False
+320.8652 	EXP 	text_2: autoDraw = False
+320.8652 	EXP 	text: autoDraw = True
+320.8652 	EXP 	fixation_8: autoDraw = True
+323.5046 	DATA 	Keypress: escape
+323.6888 	EXP 	window1: mouseVisible = True

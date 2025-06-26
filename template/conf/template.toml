@@ -1,0 +1,70 @@
+##### Configuration file #####
+
+# You will need to change the below variables to suit your
+# particular project. However, if you are simply running
+# the template project example as-is, you do not need 
+# to change these values. 
+
+# You can also specify new variables in this toml file
+# which can be easily accessed both in the
+# RTCloud web browser and in the experiment script as 
+# "cfg.[your_variable_name]". 
+
+# This title will be displayed at the top of the RT-Cloud
+# web interface.
+title = "Template Project"
+
+# subjectNum, subjectDay, scanNum, and runNum must be defined
+# for the web interface to work properly. Note that scanNum
+# and runNum should be lists. 
+subjectNum = 101
+subjectDay = 1 
+scanNum = [1]
+runNum = [1] # defines the starting run number
+
+# If replaying brain images, "demoStep" simulates how long to wait (seconds) 
+# between reading in each DICOM (i.e., it defines the simulated TR).
+demoStep = 2.0
+
+# Check with your MRI technician or your previously collected DICOMs
+# to ensure that the naming pattern of your DICOMs
+# will match with the following pattern. Here we assume a file naming
+# pattern of "001_000003_000006.dcm", which would refer to the DICOM 
+# from the sixth TR in the third run of the first scanning session. 
+# Edit to match your expected DICOM naming pattern.
+dicomNamePattern = "001_{RUN:06d}_{TR:06d}.dcm"
+
+# Specify number of runs/blocks and inital run/block number. 
+# 1-indexed to align with how DICOMs are named.
+# Good to set in this .toml file so if you need to redo
+# a run or block, you can click "Stop", change these variables
+# in the web interface, and then click Run.
+blockNum = 1
+numRuns = 2
+numBlocks = 8
+
+# Specify other important variables 
+taskName = 'sceneface'
+num_total_TRs = 242 
+num_TRs_per_block = 29
+
+# You shouldn't need to change this value. It's to ensure that
+# RT-Cloud doesn't accidentally read in a DICOM that is in the
+# process of being loaded.
+minExpectedDicomSize = 300000
+
+# Below variables define the plot that will be displayed and update 
+# on the "Data Plots" tab of the RT-Cloud web browser. A new plot
+# following this format can be displayed for every run.
+plotTitle = 'Realtime Classification Plot'
+plotXLabel = 'Sample #'
+plotYLabel = '-1=Face , 1=Scene'
+plotXRangeLow = 0
+plotXRangeHigh = 100
+plotYRangeLow = -1
+plotYRangeHigh = 1
+plotAutoRangeX = false
+plotAutoRangeY = true
+
+# If replaying an OpenNeuro dataset, paste its accession number below
+dsAccessionNumber = 'None'    # can replace 'None' with e.g. 'ds002014'

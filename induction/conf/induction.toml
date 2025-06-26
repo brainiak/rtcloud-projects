@@ -1,0 +1,50 @@
+##### Configuration file #####
+
+
+
+# subjectNum, subjectDay, scanNum, and runNum must be defined
+# for the web interface to work properly. Note that scanNum
+# and runNum should be lists.
+subjectNum = 922
+subjectDay = 1
+task = "feedback"
+sham = false
+runNum = [1] # defines the starting run number
+# Specify other important variables
+num_runs_before_rt_flag = "default" #for testing this is going to be 5, should be 1 otherwise
+
+dicomRoot = "None"
+outRoot = "None" 
+dateString = "20230712"
+send_results = true
+
+# Check with your MRI technician or your previously collected DICOMs
+# to ensure that the naming pattern of your DICOMs
+# will match with the following pattern. Here we assume a file naming
+# pattern of "001_000003_000006.dcm", which would refer to the DICOM 
+# from the sixth TR in the third run of the first scanning session. 
+# Edit to match your expected DICOM naming pattern.
+dicomNamePattern = "001_{RUN:06d}_{TR:06d}.dcm"
+
+feedback_n_trs = 270
+feedback_n_runs = 3
+tnt_n_trs = 160
+tnt_n_runs = 4
+#things below here shouldnt have to be chnaged
+title = "induction"
+scanNum = 1 # defines the session number which will also never change
+minExpectedDicomSize = 300000
+
+plotTitle = 'Realtime feedback scores'
+plotXLabel = 'Trial'
+plotYLabel = 'Score'
+plotXRangeLow = 1
+plotXRangeHigh = 18
+plotYRangeLow = -1
+plotYRangeHigh = 1
+plotAutoRangeX = false
+plotAutoRangeY = false
+
+demoStep = 0.0
+
+dsAccessionNumber = 'None'

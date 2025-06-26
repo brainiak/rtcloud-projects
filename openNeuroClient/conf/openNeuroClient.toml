@@ -1,0 +1,14 @@
+title = 'OpenNeuro Client'
+dsAccessionNumber = 'ds002338'
+subjectName = "xp201"
+session=""
+task=""
+runNum = ["01"]
+scanNum = [1]
+
+plotTitle = 'Realtime Plot'
+plotXLabel = 'Volume #'
+plotYLabel = 'Value'
+plotAutoRangeX = true
+plotAutoRangeY = true
+
