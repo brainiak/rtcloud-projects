@@ -506,7 +506,42 @@ def create_design_matrix(images, starts, is_new_run, unique_images, n_runs, n_tr
 from generative_models.sgm.modules.encoders.modules import FrozenOpenCLIPImageEmbedder
 from scipy import stats
 from tqdm import tqdm
-def calculate_retrieval_metrics(all_clip_voxels, all_images):
+def get_mst_pairs(mst_pairs_dir="/home/amaarc/rtcloud-projects/mindeye/3t/data/all_stimuli/MST_pairs"):
+    import os
+    import re
+    from collections import defaultdict
+    
+    mst_files = [f for f in os.listdir(mst_pairs_dir) if f.startswith('pair_')]
+    
+    pairs_dict = defaultdict(list)
+    
+    for filename in mst_files:
+        if filename.startswith('pair_'):
+            if '_w_' in filename:
+                match = re.match(r'pair_(\d+)_w_(.+)(\d)\.jpg', filename)
+                if match:
+                    pair_num = int(match.group(1))
+                    pairs_dict[pair_num].append(os.path.join(mst_pairs_dir, filename))
+            else:
+                match = re.match(r'pair_(\d+)_(\d+)_(\d+)\.png', filename)
+                if match:
+                    pair_num = int(match.group(1))
+                    pairs_dict[pair_num].append(os.path.join(mst_pairs_dir, filename))
+    
+    mst_pairs = []
+    for pair_num in sorted(pairs_dict.keys()):
+        files = pairs_dict[pair_num]
+        if len(files) == 2:
+            files.sort()
+            mst_pairs.append(tuple(files))
+        else:
+            print(f"Warning: Pair {pair_num} has {len(files)} files instead of 2")
+    
+    print(f"Loaded {len(mst_pairs)} MST pairs from {mst_pairs_dir}")
+    return mst_pairs
+
+
+def calculate_retrieval_metrics(all_clip_voxels, all_images, mst_pairs=None):
     print("Loading clip_img_embedder")
     try:
         print(clip_img_embedder)
@@ -567,8 +602,206 @@ def calculate_retrieval_metrics(all_clip_voxels, all_images):
     print(f"overall fwd percent_correct: {all_fwd_acc[0]:.4f}")
     print(f"overall bwd percent_correct: {all_bwd_acc[0]:.4f}")
 
-    return all_fwd_acc[0], all_bwd_acc[0]
+    # Calculate MST 2-AFC if pairs provided
+    mst_2afc_score = None
+    if mst_pairs is not None:
+        print("Calculating MST 2-AFC...")
+        mst_2afc_score = calculate_mst_2afc(all_clip_voxels, all_images, mst_pairs, clip_img_embedder, all_emb, all_emb_, mst_mapping=None)
+        print(f"MST 2-AFC accuracy: {mst_2afc_score:.4f}")
 
+    if mst_2afc_score is not None:
+        return all_fwd_acc[0], all_bwd_acc[0], mst_2afc_score
+    else:
+        return all_fwd_acc[0], all_bwd_acc[0]
+
+
+def load_mst_mapping_from_tr_labels(
+    events_file="/home/amaarc/rtcloud-projects/mindeye/3t/data/events/csv/sub-005_ses-03.csv",
+    runs=list(range(1, 12))
+):
+    import pandas as pd
+    import os
+    
+    df = pd.read_csv(events_file)
+    
+    mst_trials = df[df['current_image'].str.contains('MST_pairs', na=False)].copy()
+    mst_trials = mst_trials.sort_values(['run_num', 'trial_index']).reset_index(drop=True)
+    
+    mst_mapping = {}
+    
+    for brain_idx, (_, row) in enumerate(mst_trials.iterrows()):
+        current_image = row['current_image']
+        run_num = row['run_num']
+        
+        if (run_num + 1) in runs:
+            filename = os.path.basename(current_image)
+            
+            # Map filename to brain embedding index
+            if filename not in mst_mapping:
+                mst_mapping[filename] = []
+            mst_mapping[filename].append(brain_idx)
+    
+    # for simplicity use the first occurrence of each image
+    for filename in mst_mapping:
+        if len(mst_mapping[filename]) > 0:
+            mst_mapping[filename] = mst_mapping[filename][0]
+    
+    print(f"Created MST mapping with {len(mst_mapping)} MST images")
+    for filename, idx in sorted(mst_mapping.items()): 
+        print(f"  {filename} -> brain index {idx}")
+    
+    return mst_mapping
+
+
+def load_experiment_images_from_tr_labels(
+    events_file="/home/amaarc/rtcloud-projects/mindeye/3t/data/events/csv/sub-005_ses-03.csv",
+    data_dir="/home/amaarc/rtcloud-projects/mindeye/3t/data",
+    runs=[1],  # Which runs to load
+    clipvoxels_path=None
+):
+    import pandas as pd
+    import os
+    import torch
+    from PIL import Image
+    from torchvision import transforms
+    
+    if clipvoxels_path and runs == [1]:
+        import re
+        match = re.search(r'run-(\d+)', clipvoxels_path)
+        if match:
+            runs = [int(match.group(1))]
+    
+    df = pd.read_csv(events_file)
+    
+    # filter to MST trials and specified runs
+    mst_trials = df[df['current_image'].str.contains('MST_pairs', na=False)].copy()
+    
+    resize_transform = transforms.Resize((224, 224))
+    to_tensor_transform = transforms.ToTensor()
+    
+    all_images = []
+    
+    for run in runs:
+
+        events_run = run - 1
+        run_mst_trials = mst_trials[mst_trials['run_num'] == events_run]
+        run_mst_trials = run_mst_trials.sort_values('trial_index')
+        
+        for _, row in run_mst_trials.iterrows():
+            current_image = row['current_image']
+            
+            # Load the image
+            img_path = os.path.join(data_dir, current_image)
+            if os.path.exists(img_path):
+                try:
+                    img = Image.open(img_path).convert('RGB')
+                    img_tensor = to_tensor_transform(img)
+                    img_tensor = resize_transform(img_tensor.unsqueeze(0)).squeeze(0)
+                    all_images.append(img_tensor)
+                except Exception as e:
+                    print(f"Error loading image {img_path}: {e}")
+                    blank_img = torch.zeros(3, 224, 224)
+                    all_images.append(blank_img)
+            else:
+                print(f"Image not found: {img_path}")
+
+                blank_img = torch.zeros(3, 224, 224)
+                all_images.append(blank_img)
+    
+    if all_images:
+        return torch.stack(all_images)
+    else:
+        raise ValueError("No images loaded!")
+
+
+def calculate_mst_2afc(all_clip_voxels, all_images, mst_pairs, clip_img_embedder, all_emb=None, all_emb_=None, mst_mapping=None):
+
+    import torch
+    import torch.nn as nn
+    import os
+    from PIL import Image
+    from torchvision import transforms
+    
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    if mst_mapping is None:
+        print("Loading MST mapping from TR labels...")
+        mst_mapping = load_mst_mapping_from_tr_labels()
+    
+    correct_pairs = 0
+    total_pairs = 0
+    
+    with torch.no_grad():
+        for pair_idx, (img_path_a, img_path_b) in enumerate(mst_pairs):
+            img_name_a = os.path.basename(img_path_a)
+            img_name_b = os.path.basename(img_path_b)
+            
+            brain_idx_a = mst_mapping.get(img_name_a)
+            brain_idx_b = mst_mapping.get(img_name_b)
+            
+            if brain_idx_a is None or brain_idx_b is None:
+                print(f"Could not find brain embedding indices for MST pair: {img_name_a}, {img_name_b}")
+                # Skip this pair
+                continue
+                
+            try:
+                # use the experiment images that correspond to these brain embeddings
+                img_a_tensor = all_images[brain_idx_a].unsqueeze(0).to(device)
+                img_b_tensor = all_images[brain_idx_b].unsqueeze(0).to(device)
+
+                with torch.cuda.amp.autocast(dtype=torch.float16):
+                    clip_emb_a = clip_img_embedder(img_a_tensor.to(torch.float16)).float()
+                    clip_emb_b = clip_img_embedder(img_b_tensor.to(torch.float16)).float()
+                
+                clip_emb_a_norm = nn.functional.normalize(clip_emb_a.flatten(1), dim=-1)
+                clip_emb_b_norm = nn.functional.normalize(clip_emb_b.flatten(1), dim=-1)
+                
+                if brain_idx_a < len(all_clip_voxels) and brain_idx_b < len(all_clip_voxels):
+                    # Extract brain embeddings for both images
+                    brain_emb_a = all_emb_[brain_idx_a:brain_idx_a+1] if all_emb_ is not None else all_clip_voxels[brain_idx_a:brain_idx_a+1]
+                    brain_emb_b = all_emb_[brain_idx_b:brain_idx_b+1] if all_emb_ is not None else all_clip_voxels[brain_idx_b:brain_idx_b+1]
+                    
+                    if brain_emb_a.dim() > 2:
+                        brain_emb_a = brain_emb_a.flatten(1)
+                    if brain_emb_b.dim() > 2:
+                        brain_emb_b = brain_emb_b.flatten(1)
+                        
+                    brain_emb_a = nn.functional.normalize(brain_emb_a, dim=-1)
+                    brain_emb_b = nn.functional.normalize(brain_emb_b, dim=-1)
+                    
+                    # corresponding 2-AFC: Following the reference implementation exactly
+                    # is brain embedding for image A more similar to CLIP embedding for A or B?
+                    sim_a_a = batchwise_cosine_similarity(brain_emb_a, clip_emb_a_norm)
+                    sim_a_b = batchwise_cosine_similarity(brain_emb_a, clip_emb_b_norm)
+                    
+                    # check if model correctly chooses A over B for brain signal A
+                    if torch.diag(sim_a_a) > torch.diag(sim_a_b):
+                        correct_pairs += 1
+                    total_pairs += 1
+                    
+                    # is brain embedding for image B more similar to CLIP embedding for B or A?
+                    sim_b_b = batchwise_cosine_similarity(brain_emb_b, clip_emb_b_norm)
+                    sim_b_a = batchwise_cosine_similarity(brain_emb_b, clip_emb_a_norm)
+                    
+                    # check if model correctly chooses B over A for brain signal B  
+                    if torch.diag(sim_b_b) > torch.diag(sim_b_a):
+                        correct_pairs += 1
+                    total_pairs += 1
+                    
+                else:
+                    print(f"Brain embedding indices out of range: {brain_idx_a}, {brain_idx_b} (max: {len(all_clip_voxels)})")
+                
+            except Exception as e:
+                print(f"Error processing MST pair {pair_idx} ({img_name_a}, {img_name_b}): {e}")
+                continue
+    
+    if total_pairs > 0:
+        accuracy = correct_pairs / total_pairs
+        print(f"MST 2-AFC: {correct_pairs}/{total_pairs} correct = {accuracy:.4f}")
+        return accuracy
+    else:
+        print("No MST pairs could be processed")
+        return 0.0
 
 from torchvision.models.feature_extraction import create_feature_extractor, get_graph_node_names
 
