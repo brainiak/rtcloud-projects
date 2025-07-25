@@ -1,5 +1,6 @@
-mindeye/3t/
+# mindeye/3t/
 mindeye/conf/config.json
+mindeye/venv
 
 mindeye/.Rhistory
 mindeye/.ipynb_checkpoints/
