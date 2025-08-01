@@ -86,7 +86,7 @@ def fit_and_run_glm(
         # all_betas.append(beta_map_np)
 
     # hrfs_indices is a numpy array with same shape than beta_map_np with numbers from 0 to 19
-    betas = np.array(betas).squeeze(-1)
+    betas = np.array(betas).squeeze()
     idx_expanded = hrfs_indices[np.newaxis, ...]  
     betas = np.take_along_axis(betas, idx_expanded, axis=0)[0]
 
