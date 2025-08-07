@@ -4,7 +4,7 @@ mindeye/conf/config.json
 mindeye/.Rhistory
 mindeye/.ipynb_checkpoints/
 mindeye/debug_betas.ipynb
-mindeye/mindeye.py
+#mindeye/mindeye.py
 mindeye/mindeye_6_21_2024.py
 mindeye/mindeye_no_sliceTimed.py
 
