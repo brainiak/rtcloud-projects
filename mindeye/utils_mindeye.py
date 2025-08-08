@@ -559,10 +559,9 @@ def calculate_retrieval_metrics(all_clip_voxels, all_images, mst_pairs=None):
     assert len(all_images) == len(all_clip_voxels)  
     print("The total pool of images and clip voxels to do retrieval on is: ", len(all_images))
 
-    # If MST pairs provided, skip expensive full retrieval metrics and compute MST 2-AFC only
+
     if mst_pairs is not None:
-        print("MST pairs provided - computing MST 2-AFC only (skipping full retrieval metrics)")
-        print("Calculating MST 2-AFC...")
+        print("Calculating MST 2-AFC")
         mst_2afc_score = calculate_mst_2afc(all_clip_voxels, all_images, mst_pairs, clip_img_embedder, all_emb=None, all_emb_=None, mst_mapping=None)
         print(f"MST 2-AFC accuracy: {mst_2afc_score:.4f}")
         return 0.0, 0.0, mst_2afc_score  # Return dummy values for fwd/bwd acc since we're only computing MST
@@ -714,11 +713,6 @@ def load_experiment_images_from_tr_labels(
 
 
 def calculate_mst_2afc(all_clip_voxels, all_images, mst_pairs, clip_img_embedder, all_emb=None, all_emb_=None, mst_mapping=None):
-    """
-    Calculate MST 2-AFC accuracy - OPTIMIZED BATCH VERSION
-    This version pre-computes all CLIP embeddings to eliminate the 5-hour bottleneck
-    that was caused by loading and processing images one-by-one.
-    """
     import torch
     import torch.nn as nn
     import os
@@ -728,29 +722,28 @@ def calculate_mst_2afc(all_clip_voxels, all_images, mst_pairs, clip_img_embedder
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     if mst_mapping is None:
-        print("Creating MST mapping from loaded data...")
-        # Hardcode CSV path and create mapping
+        print("Creating MST mapping from loaded data")
+
+        # hardcode CSV path and create mapping
         import pandas as pd
         csv_path = "/home/amaarc/rtcloud-projects/mindeye/3t/data/events/csv/sub-005_ses-03.csv"
         df = pd.read_csv(csv_path)
         mst_trials = df[df['current_image'].str.contains('MST_pairs', na=False)].copy()
         mst_trials = mst_trials.sort_values(['run_num', 'trial_index']).reset_index(drop=True)
         
-        # Create simple mapping - use trial order as index
+        # create simple mapping
         mst_mapping = {}
         for brain_idx, (_, row) in enumerate(mst_trials.iterrows()):
             filename = os.path.basename(row['current_image'])
             if filename not in mst_mapping:
                 mst_mapping[filename] = brain_idx
     
-    print(f"Processing {len(mst_pairs)} MST pairs for 2-AFC accuracy...")
-    print("OPTIMIZATION: Pre-computing CLIP embeddings for all MST images...")
+    print(f"Processing {len(mst_pairs)} MST pairs for 2-AFC accuracy")
     
-    # OPTIMIZATION 1: Pre-compute CLIP embeddings for all unique MST images
     unique_images = set()
     valid_pairs = []
-    
-    # First pass: collect all unique image paths and validate pairs
+        
+        # collect all unique image paths and validate pairs
     for pair_idx, (img_path_a, img_path_b) in enumerate(mst_pairs):
         img_name_a = os.path.basename(img_path_a)
         img_name_b = os.path.basename(img_path_b)
@@ -773,15 +766,14 @@ def calculate_mst_2afc(all_clip_voxels, all_images, mst_pairs, clip_img_embedder
     
     print(f"Found {len(valid_pairs)} valid pairs with {len(unique_images)} unique images")
     
-    # OPTIMIZATION 2: Batch load and process all unique images
     image_clip_embeddings = {}
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor()
     ])
     
-    # Process images in batches to avoid memory issues
-    batch_size = 32  # Adjust based on GPU memory
+    # process images in batches
+    batch_size = 32
     unique_images_list = list(unique_images)
     
     for i in range(0, len(unique_images_list), batch_size):
@@ -801,12 +793,11 @@ def calculate_mst_2afc(all_clip_voxels, all_images, mst_pairs, clip_img_embedder
                 continue
         
         if batch_tensors:
-            # Batch compute CLIP embeddings
             batch_tensor = torch.stack(batch_tensors).to(device)
             with torch.cuda.amp.autocast(dtype=torch.float16):
                 batch_clip_embs = clip_img_embedder(batch_tensor.to(torch.float16)).float()
             
-            # Normalize and store
+            # normalize and store
             batch_clip_embs_norm = nn.functional.normalize(batch_clip_embs.flatten(1), dim=-1)
             for j, img_path in enumerate(batch_paths):
                 image_clip_embeddings[img_path] = batch_clip_embs_norm[j:j+1]
@@ -815,7 +806,6 @@ def calculate_mst_2afc(all_clip_voxels, all_images, mst_pairs, clip_img_embedder
     
     print(f"Pre-computed CLIP embeddings for {len(image_clip_embeddings)} images")
     
-    # OPTIMIZATION 3: Process MST pairs using pre-computed embeddings
     correct_pairs = 0
     total_pairs = 0
     
