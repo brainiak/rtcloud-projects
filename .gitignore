@@ -1,7 +1,7 @@
 # mindeye/3t/
 mindeye/conf/config.json
 mindeye/venv
-
+venv/
 mindeye/.Rhistory
 mindeye/.ipynb_checkpoints/
 mindeye/debug_betas.ipynb
