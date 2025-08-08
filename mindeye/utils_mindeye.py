@@ -381,7 +381,7 @@ def load_design_files(sub, session, func_task_name, designdir, design_ses_list=N
     elif (sub=='sub-001' and session in ('ses-02', 'ses-03', 'ses-04', 'ses-05')) or \
          (sub=='sub-002' and session in ('ses-02')) or sub=='sub-003' or \
          (sub=='sub-004' and session in ('ses-01', 'ses-02')) or \
-         (sub=='sub-005' and session in ('ses-01', 'ses-02', 'ses-03')) or \
+         (sub=='sub-005' and session in ('ses-01', 'ses-02', 'ses-03', 'ses-06')) or \
          (sub=='sub-006' and session in ('ses-01')):
         
         if (sub=='sub-001' and session in ('ses-05')):
@@ -411,7 +411,7 @@ def load_design_files(sub, session, func_task_name, designdir, design_ses_list=N
             assert func_task_name == 'C'
             filename = f"{designdir}/csv/{sub}_ses-08.csv"
 
-        elif (sub=='sub-005' and session in ('ses-01', 'ses-02', 'ses-03')) or sub=='sub-006' and session in ('ses-01'):
+        elif (sub=='sub-005' and session in ('ses-01', 'ses-02', 'ses-03', 'ses-06')) or sub=='sub-006' and session in ('ses-01'):
             filename = f"{designdir}/csv/{sub}_{session}.csv"
         
         data, starts, images, is_new_run, image_names = process_design(filename)
@@ -541,7 +541,7 @@ def get_mst_pairs(mst_pairs_dir):
     return mst_pairs
 
 
-def calculate_retrieval_metrics(all_clip_voxels, all_images, mst_pairs=None):
+def calculate_retrieval_metrics(all_clip_voxels, all_images, data_path, mst_pairs=None):
     print("Loading clip_img_embedder")
     try:
         print(clip_img_embedder)
@@ -562,7 +562,7 @@ def calculate_retrieval_metrics(all_clip_voxels, all_images, mst_pairs=None):
 
     if mst_pairs is not None:
         print("Calculating MST 2-AFC")
-        mst_2afc_score = calculate_mst_2afc(all_clip_voxels, all_images, mst_pairs, clip_img_embedder, all_emb=None, all_emb_=None, mst_mapping=None)
+        mst_2afc_score = calculate_mst_2afc(all_clip_voxels, all_images, mst_pairs, clip_img_embedder, data_path, all_emb=None, all_emb_=None, mst_mapping=None)
         print(f"MST 2-AFC accuracy: {mst_2afc_score:.4f}")
         return 0.0, 0.0, mst_2afc_score  # Return dummy values for fwd/bwd acc since we're only computing MST
 
@@ -712,7 +712,7 @@ def load_experiment_images_from_tr_labels(
         raise ValueError("No images loaded!")
 
 
-def calculate_mst_2afc(all_clip_voxels, all_images, mst_pairs, clip_img_embedder, all_emb=None, all_emb_=None, mst_mapping=None):
+def calculate_mst_2afc(all_clip_voxels, all_images, mst_pairs, clip_img_embedder, data_path, all_emb=None, all_emb_=None, mst_mapping=None):
     import torch
     import torch.nn as nn
     import os
@@ -726,7 +726,7 @@ def calculate_mst_2afc(all_clip_voxels, all_images, mst_pairs, clip_img_embedder
 
         # hardcode CSV path and create mapping
         import pandas as pd
-        csv_path = "/home/amaarc/rtcloud-projects/mindeye/3t/data/events/csv/sub-005_ses-03.csv"
+        csv_path = f"{data_path}/events/csv/sub-005_ses-03.csv"
         df = pd.read_csv(csv_path)
         mst_trials = df[df['current_image'].str.contains('MST_pairs', na=False)].copy()
         mst_trials = mst_trials.sort_values(['run_num', 'trial_index']).reset_index(drop=True)
