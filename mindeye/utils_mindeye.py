@@ -541,10 +541,9 @@ def get_mst_pairs(mst_pairs_dir):
     return mst_pairs
 
 
-def calculate_retrieval_metrics(all_clip_voxels, all_images, mst_pairs=None):
-    print("Loading clip_img_embedder")
+def calculate_retrieval_metrics(all_clip_voxels, all_images, csv_path):
     try:
-        print(clip_img_embedder)
+        clip_img_embedder
     except:
         clip_img_embedder = FrozenOpenCLIPImageEmbedder(
             arch="ViT-bigG-14",
@@ -553,36 +552,18 @@ def calculate_retrieval_metrics(all_clip_voxels, all_images, mst_pairs=None):
             only_tokens=True,
         )
         clip_img_embedder.to(device)
-    clip_seq_dim = 256
-    clip_emb_dim = 1664
-
+    
     assert len(all_images) == len(all_clip_voxels)  
-    print("The total pool of images and clip voxels to do retrieval on is: ", len(all_images))
-
-
-    if mst_pairs is not None:
-        print("Calculating MST 2-AFC")
-        mst_2afc_score = calculate_mst_2afc(all_clip_voxels, all_images, mst_pairs, clip_img_embedder, all_emb=None, all_emb_=None, mst_mapping=None)
-        print(f"MST 2-AFC accuracy: {mst_2afc_score:.4f}")
-        return 0.0, 0.0, mst_2afc_score  # Return dummy values for fwd/bwd acc since we're only computing MST
-
-    # Original full retrieval metrics computation
-    all_fwd_acc = []
-    all_bwd_acc = []
-    all_percent_correct_fwds, all_percent_correct_bwds = [], []
 
     with torch.cuda.amp.autocast(dtype=torch.float16):
-        print("Creating embeddings for images")
         with torch.no_grad():
-            all_emb = clip_img_embedder(all_images.to(torch.float16).to(device)).float() # CLIP-Image
-
-        all_emb_ = all_clip_voxels # CLIP-Brain
-
-        print("Calculating retrieval metrics")
-        # flatten if necessary
+            all_emb = clip_img_embedder(all_images.to(device)).float()
+        all_emb_ = all_clip_voxels 
+        
+        # flatten 
         all_emb = all_emb.reshape(len(all_emb),-1).to(device)
         all_emb_ = all_emb_.reshape(len(all_emb_),-1).to(device)
-
+        
         # l2norm 
         all_emb = nn.functional.normalize(all_emb,dim=-1)
         all_emb_ = nn.functional.normalize(all_emb_,dim=-1)
@@ -590,31 +571,18 @@ def calculate_retrieval_metrics(all_clip_voxels, all_images, mst_pairs=None):
         all_labels = torch.arange(len(all_emb)).to(device)
         all_bwd_sim = batchwise_cosine_similarity(all_emb,all_emb_)  # clip, brain
         all_fwd_sim = batchwise_cosine_similarity(all_emb_,all_emb)  # brain, clip
-
-        # if "ses-0" not in model_name or "ses-01" in model_name or "ses-04" in model_name:
-        #     assert len(all_fwd_sim) == 100
-        #     assert len(all_bwd_sim) == 100
-        # else:
-        #     assert len(all_fwd_sim) == 50
-        #     assert len(all_bwd_sim) == 50
         
-        all_percent_correct_fwds = topk(all_fwd_sim, all_labels, k=1).item()
-        all_percent_correct_bwds = topk(all_bwd_sim, all_labels, k=1).item()
+        fwd_acc = topk(all_fwd_sim, all_labels, k=1).item()
+        bwd_acc = topk(all_bwd_sim, all_labels, k=1).item()
 
-    all_fwd_acc.append(all_percent_correct_fwds)
-    all_bwd_acc.append(all_percent_correct_bwds)
+    # calculate mst 2afc
+    mst_2afc_score = calculate_mst_2afc(all_emb_, all_emb, clip_img_embedder, csv_path)
 
-    all_fwd_sim = np.array(all_fwd_sim.cpu())
-    all_bwd_sim = np.array(all_bwd_sim.cpu())
-
-    print(f"overall fwd percent_correct: {all_fwd_acc[0]:.4f}")
-    print(f"overall bwd percent_correct: {all_bwd_acc[0]:.4f}")
-
-    return all_fwd_acc[0], all_bwd_acc[0]
+    return fwd_acc, bwd_acc, mst_2afc_score
 
 
 def load_mst_mapping_from_tr_labels(
-    events_file="/home/amaarc/rtcloud-projects/mindeye/3t/data/events/csv/sub-005_ses-03.csv",
+    events_file,
     runs=list(range(1, 12))
 ):
     import pandas as pd
@@ -711,156 +679,105 @@ def load_experiment_images_from_tr_labels(
     else:
         raise ValueError("No images loaded!")
 
+def find_all_indices(lst, item):
+    return [i for i, x in enumerate(lst) if x == item]
 
-def calculate_mst_2afc(all_clip_voxels, all_images, mst_pairs, clip_img_embedder, all_emb=None, all_emb_=None, mst_mapping=None):
+def calculate_mst_2afc(all_brain_emb, all_clip_emb, clip_img_embedder, csv_path):
+
     import torch
-    import torch.nn as nn
-    import os
-    from PIL import Image
-    from torchvision import transforms
+    import pandas as pd
+    import numpy as np
     
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    
-    if mst_mapping is None:
-        print("Creating MST mapping from loaded data")
-
-        # hardcode CSV path and create mapping
-        import pandas as pd
-        csv_path = "/home/amaarc/rtcloud-projects/mindeye/3t/data/events/csv/sub-005_ses-03.csv"
+    try:
         df = pd.read_csv(csv_path)
-        mst_trials = df[df['current_image'].str.contains('MST_pairs', na=False)].copy()
-        mst_trials = mst_trials.sort_values(['run_num', 'trial_index']).reset_index(drop=True)
+        valid_trials = df[(df['current_image'].notna()) & (df['current_image'] != 'blank.jpg')]
+        image_names = valid_trials['current_image'].values.tolist()
         
-        # create simple mapping
-        mst_mapping = {}
-        for brain_idx, (_, row) in enumerate(mst_trials.iterrows()):
-            filename = os.path.basename(row['current_image'])
-            if filename not in mst_mapping:
-                mst_mapping[filename] = brain_idx
-    
-    print(f"Processing {len(mst_pairs)} MST pairs for 2-AFC accuracy")
-    
-    unique_images = set()
-    valid_pairs = []
-        
-        # collect all unique image paths and validate pairs
-    for pair_idx, (img_path_a, img_path_b) in enumerate(mst_pairs):
-        img_name_a = os.path.basename(img_path_a)
-        img_name_b = os.path.basename(img_path_b)
-        
-        brain_idx_a = mst_mapping.get(img_name_a)
-        brain_idx_b = mst_mapping.get(img_name_b)
-        
-        if brain_idx_a is None or brain_idx_b is None:
-            continue
-            
-        if os.path.exists(img_path_a) and os.path.exists(img_path_b):
-            if brain_idx_a < len(all_clip_voxels) and brain_idx_b < len(all_clip_voxels):
-                unique_images.add(img_path_a)
-                unique_images.add(img_path_b)
-                valid_pairs.append((img_path_a, img_path_b, brain_idx_a, brain_idx_b))
-    
-    if not valid_pairs:
-        print("No valid MST pairs found")
-        return 0.0
-    
-    print(f"Found {len(valid_pairs)} valid pairs with {len(unique_images)} unique images")
-    
-    image_clip_embeddings = {}
-    transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor()
-    ])
-    
-    # process images in batches
-    batch_size = 32
-    unique_images_list = list(unique_images)
-    
-    for i in range(0, len(unique_images_list), batch_size):
-        batch_images = unique_images_list[i:i+batch_size]
-        batch_tensors = []
-        batch_paths = []
-        
-        # Load batch of images
-        for img_path in batch_images:
-            try:
-                img = Image.open(img_path).convert('RGB')
-                img_tensor = transform(img)
-                batch_tensors.append(img_tensor)
-                batch_paths.append(img_path)
-            except Exception as e:
-                print(f"Error loading {img_path}: {e}")
+        all_MST_images = {}
+        for i, im in enumerate(image_names):
+            if im == "blank.jpg" or str(im) == "nan":
                 continue
+            if 'MST' in str(im):
+                all_MST_images[i] = im
         
-        if batch_tensors:
-            batch_tensor = torch.stack(batch_tensors).to(device)
-            with torch.cuda.amp.autocast(dtype=torch.float16):
-                batch_clip_embs = clip_img_embedder(batch_tensor.to(torch.float16)).float()
-            
-            # normalize and store
-            batch_clip_embs_norm = nn.functional.normalize(batch_clip_embs.flatten(1), dim=-1)
-            for j, img_path in enumerate(batch_paths):
-                image_clip_embeddings[img_path] = batch_clip_embs_norm[j:j+1]
-                
-        print(f"Processed batch {i//batch_size + 1}/{(len(unique_images_list) + batch_size - 1)//batch_size}")
-    
-    print(f"Pre-computed CLIP embeddings for {len(image_clip_embeddings)} images")
-    
-    correct_pairs = 0
-    total_pairs = 0
-    
-    with torch.no_grad():
-        for img_path_a, img_path_b, brain_idx_a, brain_idx_b in valid_pairs:
-            try:
-                # Get pre-computed CLIP embeddings
-                if img_path_a not in image_clip_embeddings or img_path_b not in image_clip_embeddings:
-                    continue
-                
-                clip_emb_a_norm = image_clip_embeddings[img_path_a]
-                clip_emb_b_norm = image_clip_embeddings[img_path_b]
-                
-                # Extract brain embeddings
-                brain_emb_a = all_emb_[brain_idx_a:brain_idx_a+1] if all_emb_ is not None else all_clip_voxels[brain_idx_a:brain_idx_a+1]
-                brain_emb_b = all_emb_[brain_idx_b:brain_idx_b+1] if all_emb_ is not None else all_clip_voxels[brain_idx_b:brain_idx_b+1]
-                
-                # Move brain embeddings to the same device as CLIP embeddings
-                brain_emb_a = brain_emb_a.to(device)
-                brain_emb_b = brain_emb_b.to(device)
-                
-                if brain_emb_a.dim() > 2:
-                    brain_emb_a = brain_emb_a.flatten(1)
-                if brain_emb_b.dim() > 2:
-                    brain_emb_b = brain_emb_b.flatten(1)
-                    
-                brain_emb_a = nn.functional.normalize(brain_emb_a, dim=-1)
-                brain_emb_b = nn.functional.normalize(brain_emb_b, dim=-1)
-                
-                # 2-AFC calculation - direct cosine similarity (already optimized)
-                sim_a_a = torch.sum(brain_emb_a * clip_emb_a_norm, dim=-1)
-                sim_a_b = torch.sum(brain_emb_a * clip_emb_b_norm, dim=-1)
-                
-                if sim_a_a > sim_a_b:
-                    correct_pairs += 1
-                total_pairs += 1
-                
-                sim_b_b = torch.sum(brain_emb_b * clip_emb_b_norm, dim=-1)
-                sim_b_a = torch.sum(brain_emb_b * clip_emb_a_norm, dim=-1)
-                
-                if sim_b_b > sim_b_a:
-                    correct_pairs += 1
-                total_pairs += 1
-                
-            except Exception as e:
-                print(f"Error processing MST pair ({os.path.basename(img_path_a)}, {os.path.basename(img_path_b)}): {e}")
+        unique_MST_images = np.unique(list(all_MST_images.values()))
+        
+        assert unique_MST_images.shape[0] % 2 == 0  # make sure it's divisible by 2
+        MST_pairmate_names = unique_MST_images.reshape(int(unique_MST_images.shape[0]/2), 2)
+        
+        x = [im for im in image_names if str(im) not in ('blank.jpg', 'nan')]
+        
+        pairs = []
+        for i, p in enumerate(MST_pairmate_names):
+            assert p[0] != p[1]  # no duplicate images
+            pairs.append([find_all_indices(x, p[0]), find_all_indices(x, p[1])])
+        
+        pairs = np.array(pairs, dtype=object)
+        
+        mst_pairs = []
+        for pair in pairs:
+            if len(pair[0]) > 0 and len(pair[1]) > 0:
+                mst_pairs.append([pair[0][0], pair[1][0]])
+        
+        if not mst_pairs:
+            return 0.0
+        
+        mst_only_images = [img for img in image_names if 'MST' in str(img)]
+        if len(mst_only_images) != len(all_brain_emb):
+            return 0.0
+        
+        full_to_mst = {}
+        mst_idx = 0
+        for i, img in enumerate(image_names):
+            if 'MST' in str(img):
+                full_to_mst[i] = mst_idx
+                mst_idx += 1
+        
+        mst_pairs_mapped = []
+        for idx_a, idx_b in mst_pairs:
+            if idx_a in full_to_mst and idx_b in full_to_mst:
+                mst_pairs_mapped.append([full_to_mst[idx_a], full_to_mst[idx_b]])
+        
+        all_brain_norm = torch.nn.functional.normalize(all_brain_emb.flatten(1), dim=-1)
+        all_clip_norm = torch.nn.functional.normalize(all_clip_emb.flatten(1), dim=-1)
+        
+        correct = 0
+        total = 0
+        
+        for idx_a, idx_b in mst_pairs_mapped:
+            if idx_a >= len(all_brain_norm) or idx_b >= len(all_brain_norm):
                 continue
-    
-    if total_pairs > 0:
-        accuracy = correct_pairs / total_pairs
-        print(f"MST 2-AFC: {correct_pairs}/{total_pairs} correct = {accuracy:.4f}")
+                
+            # get embeddings
+            brain_a = all_brain_norm[idx_a:idx_a+1]
+            brain_b = all_brain_norm[idx_b:idx_b+1] 
+            img_a = all_clip_norm[idx_a:idx_a+1]
+            img_b = all_clip_norm[idx_b:idx_b+1]
+            
+            # calculate similarities using batchwise cosine similarity
+            sim_a_a = torch.sum(brain_a * img_a, dim=-1).item()
+            sim_a_b = torch.sum(brain_a * img_b, dim=-1).item()
+            sim_b_b = torch.sum(brain_b * img_b, dim=-1).item()
+            sim_b_a = torch.sum(brain_b * img_a, dim=-1).item()
+            
+            if sim_a_a > sim_a_b:
+                correct += 1
+            total += 1
+            
+            if sim_b_b > sim_b_a:
+                correct += 1
+            total += 1
+        
+        accuracy = correct / total if total > 0 else 0.0
+        print(f"MST 2-AFC {correct}/{total} = {accuracy:.4f}")
         return accuracy
-    else:
-        print("No MST pairs could be processed")
+        
+    except Exception as e:
+        print(f"MST 2-AFC error {e}")
+        import traceback
+        traceback.print_exc()
         return 0.0
+
 
 from torchvision.models.feature_extraction import create_feature_extractor, get_graph_node_names
 
