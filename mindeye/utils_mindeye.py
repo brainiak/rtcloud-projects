@@ -618,67 +618,6 @@ def load_mst_mapping_from_tr_labels(
     
     return mst_mapping
 
-
-def load_experiment_images_from_tr_labels(
-    events_file="/home/amaarc/rtcloud-projects/mindeye/3t/data/events/csv/sub-005_ses-03.csv",
-    data_dir="/home/amaarc/rtcloud-projects/mindeye/3t/data",
-    runs=[1],  # Which runs to load
-    clipvoxels_path=None
-):
-    import pandas as pd
-    import os
-    import torch
-    from PIL import Image
-    from torchvision import transforms
-    
-    if clipvoxels_path and runs == [1]:
-        import re
-        match = re.search(r'run-(\d+)', clipvoxels_path)
-        if match:
-            runs = [int(match.group(1))]
-    
-    df = pd.read_csv(events_file)
-    
-    # filter to MST trials and specified runs
-    mst_trials = df[df['current_image'].str.contains('MST_pairs', na=False)].copy()
-    
-    resize_transform = transforms.Resize((224, 224))
-    to_tensor_transform = transforms.ToTensor()
-    
-    all_images = []
-    
-    for run in runs:
-
-        events_run = run - 1
-        run_mst_trials = mst_trials[mst_trials['run_num'] == events_run]
-        run_mst_trials = run_mst_trials.sort_values('trial_index')
-        
-        for _, row in run_mst_trials.iterrows():
-            current_image = row['current_image']
-            
-            # Load the image
-            img_path = os.path.join(data_dir, current_image)
-            if os.path.exists(img_path):
-                try:
-                    img = Image.open(img_path).convert('RGB')
-                    img_tensor = to_tensor_transform(img)
-                    img_tensor = resize_transform(img_tensor.unsqueeze(0)).squeeze(0)
-                    all_images.append(img_tensor)
-                except Exception as e:
-                    print(f"Error loading image {img_path}: {e}")
-                    blank_img = torch.zeros(3, 224, 224)
-                    all_images.append(blank_img)
-            else:
-                print(f"Image not found: {img_path}")
-
-                blank_img = torch.zeros(3, 224, 224)
-                all_images.append(blank_img)
-    
-    if all_images:
-        return torch.stack(all_images)
-    else:
-        raise ValueError("No images loaded!")
-
 def find_all_indices(lst, item):
     return [i for i, x in enumerate(lst) if x == item]
 
