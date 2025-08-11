@@ -583,7 +583,7 @@ def calculate_retrieval_metrics(all_clip_voxels, all_images, csv_path):
 def load_experiment_images_from_tr_labels(
     events_file,
     data_dir,
-    runs,
+    runs=None,
     clipvoxels_path
 ):
     import pandas as pd
@@ -592,7 +592,7 @@ def load_experiment_images_from_tr_labels(
     from PIL import Image
     from torchvision import transforms
 
-    if clipvoxels_path and runs == [1]:
+    if clipvoxels_path and runs == None:
         import re
         match = re.search(r'run-(\d+)', clipvoxels_path)
         if match:
