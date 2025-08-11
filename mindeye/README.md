@@ -1,6 +1,16 @@
-**Overview of Real-Time Analysis Pipeline**
-
-One of the key benefits of RT-Cloud is that it makes it possible to use cutting-edge, computationally intensive large-scale AI models to analyze fMRI data in real time. This project demonstrates this point by using RT-Cloud to reconstruct and classify viewed natural scenes from fMRI data in (simulated) real-time. Specifically, this project 1) takes in 7T NIfTI images that were previously collected while participants viewed natural scenes, 2) performs real-time-compatible preprocessing and a real-time-compatible GLM to extract a beta map for each viewed natural scene, and then 3) feeds these beta maps into a MindEye2 machine learning model (previously fine-tuned on this subject’s data) to generate image reconstructions and/or retrievals. Note that the MindEye2 model requires a GPU to run, so this project only works if the data analyzer component of RT-Cloud is hosted on a GPU-enabled processor.
+# Overview
+One of the key benefits of RT-Cloud is that it makes it possible to use cutting-edge, computationally intensive, large-scale AI models to analyze fMRI data in real time. This project demonstrates this point by using RT-Cloud to reconstruct viewed natural scenes from 3T fMRI data from a new participant using a real-time adapted version of [MindEye2](https://arxiv.org/abs/2403.11207). 
+The high-level algorithm is as follows:
+1. Prior to the real-time session:
+    1. Pre-train MindEye2 using data from multiple subjects collected using 7T fMRI from the [Natural Scenes Dataset](https://naturalscenesdataset.org/)
+    2. Fine-tune the model on some data from a new participant in 3T fMRI
+2. In real-time:
+    1. Stream DICOM images as the new participant views NSD-like images in 3T fMRI
+    2. Perform motion correction and registration to a reference functional volume from a previous session 
+    3. Fit a GLM to extract a single-trial response estimate (beta map) for each viewed natural scene
+    4. Input this beta map into the fine-tuned MindEye2 model to generate image retrievals and/or reconstructions
+  
+Note that the MindEye2 model requires a GPU to run, so the data analyzer component of RT-Cloud must be hosted on a GPU-enabled computer.
 
 The fMRI data used in this demonstration project were taken from the Natural Scenes Dataset. Here is a description from the dataset’s website:
 
