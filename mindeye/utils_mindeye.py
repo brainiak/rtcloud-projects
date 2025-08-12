@@ -542,6 +542,7 @@ def get_mst_pairs(mst_pairs_dir):
 
 
 def calculate_retrieval_metrics(all_clip_voxels, all_images, csv_path):
+
     try:
         clip_img_embedder
     except:
@@ -557,7 +558,22 @@ def calculate_retrieval_metrics(all_clip_voxels, all_images, csv_path):
 
     with torch.cuda.amp.autocast(dtype=torch.float16):
         with torch.no_grad():
-            all_emb = clip_img_embedder(all_images.to(device)).float()
+
+            # check if all_images is a tensor or list of imgs
+            is_tensor_input = torch.is_tensor(all_images)
+            
+            if is_tensor_input and len(all_images.shape) == 4 and all_images.shape[1] == 3:
+
+                all_emb = clip_img_embedder(all_images.to(device)).float()
+
+            elif not is_tensor_input:
+
+                # raw images
+                all_emb = clip_img_embedder(all_images.to(device)).float()
+            else:
+                # already processed embeddings
+                all_emb = all_images.to(device).float()
+        
         all_emb_ = all_clip_voxels 
         
         # flatten 
@@ -623,81 +639,45 @@ def find_all_indices(lst, item):
 
 def calculate_mst_2afc(all_brain_emb, all_clip_emb, clip_img_embedder, csv_path):
 
+    # assumes input contains paired images in sequence like 0-1, 2-3, 4-5 ...
     import torch
-    import pandas as pd
     import numpy as np
     
     try:
-        df = pd.read_csv(csv_path)
-        valid_trials = df[(df['current_image'].notna()) & (df['current_image'] != 'blank.jpg')]
-        image_names = valid_trials['current_image'].values.tolist()
+        print(f"mst 2afc: processing {len(all_brain_emb)} input embeddings")
         
-        all_MST_images = {}
-        for i, im in enumerate(image_names):
-            if im == "blank.jpg" or str(im) == "nan":
-                continue
-            if 'MST' in str(im):
-                all_MST_images[i] = im
-        
-        unique_MST_images = np.unique(list(all_MST_images.values()))
-        
-        assert unique_MST_images.shape[0] % 2 == 0  # make sure it's divisible by 2
-        MST_pairmate_names = unique_MST_images.reshape(int(unique_MST_images.shape[0]/2), 2)
-        
-        x = [im for im in image_names if str(im) not in ('blank.jpg', 'nan')]
-        
-        pairs = []
-        for i, p in enumerate(MST_pairmate_names):
-            assert p[0] != p[1]  # no duplicate images
-            pairs.append([find_all_indices(x, p[0]), find_all_indices(x, p[1])])
-        
-        pairs = np.array(pairs, dtype=object)
-        
-        mst_pairs = []
-        for pair in pairs:
-            if len(pair[0]) > 0 and len(pair[1]) > 0:
-                mst_pairs.append([pair[0][0], pair[1][0]])
-        
-        if not mst_pairs:
-            return 0.0
-        
-        mst_only_images = [img for img in image_names if 'MST' in str(img)]
-        if len(mst_only_images) != len(all_brain_emb):
-            return 0.0
-        
-        full_to_mst = {}
-        mst_idx = 0
-        for i, img in enumerate(image_names):
-            if 'MST' in str(img):
-                full_to_mst[i] = mst_idx
-                mst_idx += 1
-        
-        mst_pairs_mapped = []
-        for idx_a, idx_b in mst_pairs:
-            if idx_a in full_to_mst and idx_b in full_to_mst:
-                mst_pairs_mapped.append([full_to_mst[idx_a], full_to_mst[idx_b]])
-        
+        # Normalize embeddings
         all_brain_norm = torch.nn.functional.normalize(all_brain_emb.flatten(1), dim=-1)
         all_clip_norm = torch.nn.functional.normalize(all_clip_emb.flatten(1), dim=-1)
+        
+
+        num_images = len(all_brain_norm)
+        if num_images % 2 != 0:
+            print(f"Warning: Odd number of images ({num_images}). Skipping last image.")
+            num_images -= 1
+        
+        num_pairs = num_images // 2
+        print(f"Testing {num_pairs} pairs")
         
         correct = 0
         total = 0
         
-        for idx_a, idx_b in mst_pairs_mapped:
-            if idx_a >= len(all_brain_norm) or idx_b >= len(all_brain_norm):
-                continue
-                
-            # get embeddings
+        for pair_idx in range(num_pairs):
+
+            idx_a = pair_idx * 2
+            idx_b = pair_idx * 2 + 1
+            
+            # get embeddings for the pair
             brain_a = all_brain_norm[idx_a:idx_a+1]
             brain_b = all_brain_norm[idx_b:idx_b+1] 
             img_a = all_clip_norm[idx_a:idx_a+1]
             img_b = all_clip_norm[idx_b:idx_b+1]
             
-            # calculate similarities using batchwise cosine similarity
-            sim_a_a = torch.sum(brain_a * img_a, dim=-1).item()
-            sim_a_b = torch.sum(brain_a * img_b, dim=-1).item()
-            sim_b_b = torch.sum(brain_b * img_b, dim=-1).item()
-            sim_b_a = torch.sum(brain_b * img_a, dim=-1).item()
+            # Calculate similarities
+            sim_a_a = torch.sum(brain_a * img_a, dim=-1).item()  # Brain A with Image A
+            sim_a_b = torch.sum(brain_a * img_b, dim=-1).item()  # Brain A with Image B
+            sim_b_b = torch.sum(brain_b * img_b, dim=-1).item()  # Brain B with Image B
+            sim_b_a = torch.sum(brain_b * img_a, dim=-1).item()  # Brain B with Image A
             
             if sim_a_a > sim_a_b:
                 correct += 1
@@ -708,11 +688,11 @@ def calculate_mst_2afc(all_brain_emb, all_clip_emb, clip_img_embedder, csv_path)
             total += 1
         
         accuracy = correct / total if total > 0 else 0.0
-        print(f"MST 2-AFC {correct}/{total} = {accuracy:.4f}")
+        print(f"mst 2afc {correct}/{total} = {accuracy:.4f}")
         return accuracy
         
     except Exception as e:
-        print(f"MST 2-AFC error {e}")
+        print(f"mst 2afc error {e}")
         import traceback
         traceback.print_exc()
         return 0.0
