@@ -1,10 +1,9 @@
 3t/
-mindeye/conf/config.json
 
 mindeye/.Rhistory
 mindeye/.ipynb_checkpoints/
 
-
+.venv
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
