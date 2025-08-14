@@ -1,9 +1,10 @@
 3t/
-
+rt_all_data/
 mindeye/.Rhistory
-mindeye/.ipynb_checkpoints/
-
+.ipynb_checkpoints/
+config/config.json
 .venv
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
