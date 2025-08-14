@@ -32,13 +32,13 @@ In this section, we will install a uv environment and clone repositories contain
 2. Clone this repository with `git clone https://github.com/brainiak/rtcloud-projects.git`. This will create a folder `rtcloud-projects/`, containing MindEye and other projects.
 
 ### Installing uv environment
-We use [uv](https://github.com/astral-sh/uv) to manage Python versions and dependencies. We have exact versions so you can reproduce the environment exactly.
+We use [uv](https://github.com/astral-sh/uv) to manage Python versions and dependencies. We have exact versions so you can reproduce the environment exactly. Even if you don't have Python installed on your system, uv will take care of this for you 
 1. Install uv
     * MacOS/Linux: `curl -LsSf https://astral.sh/uv/install.sh | sh`
     * Verify install using `uv --version`
 2. Create the environment
     1. `cd rtcloud-projects/mindeye/config`
-    2. Run: `uv sync --frozen`. This will: 
+    2. Run: `uv sync`. This will: 
         * Install the Python version specified in .python-version
         * Install all dependencies from pyproject.toml pinned by uv.lock
 3. Activate the environment
@@ -60,7 +60,7 @@ We use [FSL](https://fsl.fmrib.ox.ac.uk/fsl/docs/#/) for real-time compatible pr
 2. Clone the repository containing data related to Princeton 3T scans
     * Navigate to the desired location (for example, this can be inside rtcloud-projects/mindeye): `cd /path/to/rtcloud-projects/mindeye`
     * `git clone https://huggingface.co/datasets/rishab-iyer1/3t`
-3. Update `config/config.json` with the appropriate file paths
+3. Create `config/config.json` with the appropriate file paths. `config/config_example.json` is provided for reference; the local copy that you update will be automatically ignored by Git.
     * `project_path` should be set to the path to rtcloud-projects/mindeye
     * `storage_path` should be set to the path to rt_all_data
     * `data_path` and `derivatives_path` should be set to the path to 3t/data and 3t/derivatives, respectively
@@ -73,9 +73,14 @@ At this point, everything should be ready to go!
         * Defaults to http://localhost:8898 which you can enter in your web browser
         * Otherwise, enter the link that it outputs
     * Select Run All
+    * You have succeeded when you see an output like this: 
+    
+    ![alt text](https://github.com/brainiak/rtcloud-projects/raw/main/mindeye/docs/sample_jupyter_output.png "Sample Jupyter Output")
 
 ## Next steps
 
 {% comment %}
 Provide a quick recap of what has been accomplished in the quick start as a means of transitioning to next steps. Include 2-3 actionable next steps that the user take after completing the quickstart. Always link to conceptual content on the feature or product. You can also link off to other related information on docs.github.com or in GitHub Skills.
 {% endcomment %}
+
+Include citation for github style guide docs and quickstart template
