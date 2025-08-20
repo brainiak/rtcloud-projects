@@ -1,20 +1,42 @@
-# Overview
-One of the key benefits of RT-Cloud is that it makes it possible to use cutting-edge, computationally intensive, large-scale AI models to analyze fMRI data in real time. This project demonstrates this point by using RT-Cloud to reconstruct viewed natural scenes from 3T fMRI data from a new participant using a real-time adapted version of [MindEye2](https://arxiv.org/abs/2403.11207). 
-The high-level algorithm is as follows:
+# Real-time MindEye
+Real-time reconstruction of human visual perception from fMRI.
+
+Contact: Rishab Iyer (rsiyer@princeton.edu)
+
+## Introduction
+We present a first-of-its-kind pipeline that can reconstruct seen images from fMRI brain activity in real-time, using [MindEye2](https://arxiv.org/abs/2403.11207). This serves as a demonstration that RT-Cloud can support state-of-the-art AI workflows for real-time fMRI at any standard MRI facility. By enabling fine-grained decoding of cognitive representations, we substantially increase the utility of real-time fMRI as a brain-computer interface for clinical and scientific applications.
+
+## include sample picture of recon/retrieval
+
+Prior work relied on extensive processing of the [Natural Scenes Dataset](https://naturalscenesdataset.org/) (NSD), which collected 30-40 hours of data from each of a few participants. Additionally, NSD used 7 Tesla (7T) MRI which is available at only about 100 sites around the world. Our pipeline involves pre-training MindEye2 on data from NSD and then fine-tuning on just 2-3 hours of 3 Tesla (3T) data from a new participant. After this, the model can support reconstruction of images viewed by that participant using fully real-time-compatible preprocessing.
+
+Going forward, our real-time visual decoding pipeline can potentially support a range of novel applications such as treatment of clinical conditions like depression (e.g., neurofeedback studies where participants are shown how their perception of an image differs from the ground truth image) and it can facilitate probing of fundamental learning mechanisms in the brain. 
+
+## Pipeline
 1. Prior to the real-time session:
-    1. Pre-train MindEye2 using data from multiple subjects collected using 7T fMRI from the [Natural Scenes Dataset](https://naturalscenesdataset.org/)
+    1. Pre-train MindEye2 using data from multiple subjects collected using 7T fMRI from NSD
     2. Fine-tune the model on some data from a new participant in 3T fMRI
 2. In real-time:
     1. Stream DICOM images as the new participant views NSD-like images in 3T fMRI
     2. Perform motion correction and registration to a reference functional volume from a previous session 
     3. Fit a GLM to extract a single-trial response estimate (beta map) for each viewed natural scene
     4. Input this beta map into the fine-tuned MindEye2 model to generate image retrievals and/or reconstructions
-  
+
+## Prerequisites
+GPU, terminal, etc.
+
+## Installation
+Git, uv, config.json, etc.
+
+## Quickstarts
+link to quickstart and explain contents
+
+## Repositories
+task, preproc, offline
+
+## move below to realtime quickstart
+
 Note that the MindEye2 model requires a GPU to run, so the data analyzer component of RT-Cloud must be hosted on a GPU-enabled computer.
-
-The fMRI data used in this demonstration project were taken from the Natural Scenes Dataset. Here is a description from the dataset’s website:
-
-"The Natural Scenes Dataset (NSD) is a large-scale fMRI dataset conducted at ultra-high-field (7T) strength at the Center of Magnetic Resonance Research (CMRR) at the University of Minnesota. The dataset consists of whole-brain, high-resolution (1.8-mm isotropic, 1.6-s sampling rate) fMRI measurements of 8 healthy adult subjects while they viewed thousands of color natural scenes over the course of 30–40 scan sessions. While viewing these images, subjects were engaged in a continuous recognition task in which they reported whether they had seen each given image at any point in the experiment. These data constitute a massive benchmark dataset for computational models of visual representation and cognition, and can support a wide range of scientific inquiry."
 
 Prior to the (simulated) real-time session, we first pre-trained a MindEye2 model on a GPU with all data from subjects 2 through 8. Then, we fine-tuned the MindEye2 model on subject 1's day 1 data.
 

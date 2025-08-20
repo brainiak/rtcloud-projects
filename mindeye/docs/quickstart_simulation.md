@@ -1,17 +1,17 @@
 # Quickstart for Simulated Real-Time MindEye
-Quickly set up and run real-time image reconstruction using pre-collected data.
+Quickly set up and run simulated real-time image reconstruction using MindEye on pre-collected data.
 
 ## Introduction
-This quickstart guide will walk you through the minimal setup to be able to start producing real-time reconstructions. This guide uses a standalone Jupyter notebook that isolates the real-time MindEye code from the RT-Cloud framework. 
+This quickstart guide will walk you through the minimal setup to start producing real-time reconstructions using MindEye. This guide uses a standalone Jupyter notebook `rtcloud-projects/mindeye/scripts/mindeye.ipynb` that isolates the real-time MindEye code from the RT-Cloud framework. 
 
-This requires basic familiarity with Python, Git, and the command line. Specific code snippets that you should run will be formatted like `this text`. Within code snippets, paths that might differ on your computer will be formatted like \<this>.
+This requires basic familiarity with Python, Git, and the command line. Specific code snippets that you should run will be formatted like `this text`. Within code snippets, paths that might differ on your computer will be formatted like `<this>`.
 
 Use this as a first-pass to set up your environment, download the necessary files, and get familiar with the analysis pipeline. After this, you may want to proceed to [quickstart_realtime.md](quickstart_realtime.md) to use the full RT-Cloud functionality with MindEye.
 
 You have successfully completed this when you are able to run the main analysis loop and it begins generating image reconstructions.
 
 ## Prerequisites
-This has been primarily tested on Linux (RHEL and Rocky Linux 9.6). You'll need an internet connection and basic terminal access. We'll install everything else (Git, Git LFS, Python, Python packages) along the way.
+This has been primarily tested on Linux (RHEL and Rocky Linux 9.6). You'll need an internet connection, terminal access, and a GPU. We'll install everything else (Git, Git LFS, Python, Python packages) along the way.
 
 ## Setting up
 In this section, we will install a uv environment and clone repositories containing the analysis code, data, and large files.
@@ -46,7 +46,8 @@ We use [uv](https://github.com/astral-sh/uv) to manage Python versions and depen
     2. Check the Python version: `python --version`. It should match the version listed in the file `.python_version` located in this folder.
 
 ### Installing FSL
-We use [FSL](https://fsl.fmrib.ox.ac.uk/fsl/docs/#/) for real-time compatible preprocessing, using tools such as FLIRT and MCFLIRT for motion correction and registration, respectively.
+We use [FSL](https://fsl.fmrib.ox.ac.uk/fsl/docs/#/) for real-time compatible preprocessing, using tools such as MCFLIRT and FLIRT for motion correction and registration, respectively.
+
 1. Install FSL
     * MacOS/Linux: `curl -Ls https://fsl.fmrib.ox.ac.uk/fsldownloads/fslconda/releases/getfsl.sh | sh -s`
     * For other systems and additional details, see [documentation](https://fsl.fmrib.ox.ac.uk/fsl/docs/#/install/index)
@@ -61,9 +62,9 @@ We use [FSL](https://fsl.fmrib.ox.ac.uk/fsl/docs/#/) for real-time compatible pr
     * Navigate to the desired location (for example, this can be inside rtcloud-projects/mindeye): `cd /path/to/rtcloud-projects/mindeye`
     * `git clone https://huggingface.co/datasets/rishab-iyer1/3t`
 3. Create `config/config.json` with the appropriate file paths. `config/config_example.json` is provided for reference; the local copy that you update will be automatically ignored by Git.
-    * `project_path` should be set to the path to rtcloud-projects/mindeye
-    * `storage_path` should be set to the path to rt_all_data
-    * `data_path` and `derivatives_path` should be set to the path to 3t/data and 3t/derivatives, respectively
+    * `project_path` should be set to `<path/to/rtcloud-projects/mindeye>`
+    * `storage_path` should be set to `<path/to/rt_all_data>`
+    * `data_path` and `derivatives_path` should be set to `<path/to/3t/data>` and `<path/to/3t/derivatives>`, respectively
     * `fsl_path` should be set to the fsl/bin folder containing the executables of various FSL functions. This is often located in your home directory at `~/fsl/bin`
 
 ## Running the notebook in simulated real-time
