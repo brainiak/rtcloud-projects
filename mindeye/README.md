@@ -50,11 +50,12 @@ In this section, we will set up git, install a uv environment, and clone reposit
 2. Clone this repository with `git clone https://github.com/brainiak/rtcloud-projects.git`. This will create a folder `rtcloud-projects/`, containing MindEye and other projects.
 
 ### Installing uv environment
-We use uv, a fast Python package manager ([documentation](https://github.com/astral-sh/uv)) to manage Python versions and dependencies. You may be familiar with tools like conda and pip for package management; uv is a much faster and more modern alternative to these tools. We have exact versions of Python and all dependencies so you can reproduce the environment exactly. Even if you don't have Python installed on your system, uv will take care of this for you.
+We use uv, a fast Python package manager ([documentation](https://github.com/astral-sh/uv)) to manage Python versions and dependencies. You may be familiar with tools like conda and pip for package management; uv is a much faster and more modern alternative. We have exact versions of Python and all dependencies so you can reproduce the environment exactly. Even if you don't have Python installed on your system, uv will take care of this for you.
 
 1. Install uv
     * MacOS/Linux: `curl -LsSf https://astral.sh/uv/install.sh | sh`
     * Verify install using `uv --version`
+        * You may need to run `source $HOME/.local/bin/env` for uv to be a recognized command
 2. Create the environment
     1. `cd rtcloud-projects/mindeye/config`
     2. Run: `uv sync`. This will: 
@@ -72,6 +73,7 @@ We use [FSL](https://fsl.fmrib.ox.ac.uk/fsl/docs/#/) for real-time compatible pr
     * MacOS/Linux: `curl -Ls https://fsl.fmrib.ox.ac.uk/fsldownloads/fslconda/releases/getfsl.sh | sh -s`
     * For other systems and additional details, see [documentation](https://fsl.fmrib.ox.ac.uk/fsl/docs/#/install/index)
     * Successful installation should output "FSL successfully installed"
+        * You might need to run `export FSLDIR=/usr/local/fsl` and `source $FSLDIR/etc/fslconf/fsl.sh` in order to make any of the fsl commands available
     * Verify install using `flirt -version`
 
 ### Cloning other necessary repositories
@@ -88,14 +90,27 @@ We use [FSL](https://fsl.fmrib.ox.ac.uk/fsl/docs/#/) for real-time compatible pr
     * `fsl_path` should be set to the fsl/bin folder containing the executables of various FSL functions. This is often located in your home directory at `~/fsl/bin`
     * The local copy that you update (`config/config.json`) will be automatically ignored by git (due to [.gitignore](.gitignore)). It is good practice to not track user-specific file paths with version control, since each user will have different file systems. 
 
-## Quickstarts
-After you have completed the setup instructions above, you can proceed to two quickstart guides: 
-1. [`docs/quickstart_simulation.md`](docs/quickstart_simulation.md) to run real-time MindEye in simulation.
-    1.  This uses pre-collected data to reproduce the real-time-compatible preprocessing and analysis using a GPU
-    2. This is to test real-time MindEye without dependence on real data streaming with RT-Cloud
-    3. We recommend starting here before proceeding to the RT-Cloud guide, which requires a more involved setup
-2. [`docs/quickstart_realtime.md`](docs/quickstart_realtime.md) to use the full RT-Cloud functionality with MindEye.
-    1. This will allow you to perform real-time MindEye analysis with data that is streamed directly from an MRI scanner as it's being collected
+## Get started!
+After you have completed the setup instructions above, you are ready to run real-time MindEye in simulation by running the Jupyter notebook at `scripts/mindeye.ipynb`. 
+
+We recommend starting with this step before proceeding to integrating MindEye with RT-Cloud, which requires a more involved setup. 
+
+* This notebook uses pre-collected data to reproduce the real-time-compatible preprocessing and analysis using a GPU
+* This is to test real-time MindEye without any dependency on RT-Cloud, which allows you to stream fMRI data 
+
+To run with minimal setup using uv (no IDE required): `uv run --with jupyter jupyter lab`, which opens a localhost instance of Jupyter Lab using the uv environment we installed previously 
+* Defaults to http://localhost:8898 which you can open from your web browser
+* Otherwise, open the link that it outputs in your web browser, which might look something like this: `http://localhost:8888/lab?token=3a57676d6590bf560852b39fe091183c520c7563db59acea`
+* Open the notebook and select Run All
+
+Alternatively, if you prefer using an IDE like Visual Studio Code, you can just open the notebook and press "Run all". Make sure the uv environment is active.
+
+You have succeeded when you see an output like this:     
+    ![alt text](https://github.com/brainiak/rtcloud-projects/raw/main/mindeye/docs/sample_jupyter_output.png "Sample Jupyter Output")
+
+## Next steps
+1. [`docs/quickstart_simulation.md`](docs/quickstart_simulation.md) to run real-time MindEye using simulated data streaming with RT-Cloud.
+2. [`docs/quickstart_realtime.md`](docs/quickstart_realtime.md) to use the full RT-Cloud functionality with MindEye, streaming data from an MRI scanner in real-time and analyzing it as it's being collected.
 
 ## Important Repositories
 If you are planning to run your own real-time MindEye scans, here are additional repositories which you may find useful in preparing for and running the real-time session. 
