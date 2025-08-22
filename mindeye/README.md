@@ -29,7 +29,9 @@ Going forward, our real-time visual decoding pipeline can potentially support a 
     4. Input this beta map into the fine-tuned MindEye2 model to generate image retrievals and/or reconstructions
 
 ## Prerequisites
-This has been primarily tested on Linux (RHEL and Rocky Linux 9.6). You'll need an internet connection, terminal access, and a GPU. We'll install everything else (Git, Git LFS, Python, Python packages) along the way.
+This has been primarily tested on Linux (RHEL and Rocky Linux 9.6). This requires familiarity with Python, git, and the command line. Specific code snippets that you should run will be formatted like `this`. Within code snippets, paths that might differ on your computer will be formatted like `<this>`.
+
+You'll need an internet connection, terminal access, and a GPU. We'll install everything else (Git, Git LFS, Python, Python packages) along the way.
 
 ## Setup
 In this section, we will set up git, install a uv environment, and clone repositories containing the analysis code, data, and large files.
@@ -91,25 +93,7 @@ We use [FSL](https://fsl.fmrib.ox.ac.uk/fsl/docs/#/) for real-time compatible pr
     * The local copy that you update (`config/config.json`) will be automatically ignored by git (due to [.gitignore](.gitignore)). It is good practice to not track user-specific file paths with version control, since each user will have different file systems. 
 
 ## Get started!
-After you have completed the setup instructions above, you are ready to run real-time MindEye in simulation by running the Jupyter notebook at `scripts/mindeye.ipynb`. 
-
-We recommend starting with this step before proceeding to integrating MindEye with RT-Cloud, which requires a more involved setup. 
-
-* This notebook uses pre-collected data to reproduce the real-time-compatible preprocessing and analysis using a GPU
-* This is to test real-time MindEye without any dependency on RT-Cloud, which allows you to stream fMRI data 
-
-To run with minimal setup using uv (no IDE required): `uv run --with jupyter jupyter lab`, which opens a localhost instance of Jupyter Lab using the uv environment we installed previously 
-* Defaults to http://localhost:8898 which you can open from your web browser
-* Otherwise, open the link that it outputs in your web browser, which might look something like this: `http://localhost:8888/lab?token=3a57676d6590bf560852b39fe091183c520c7563db59acea`
-* Open the notebook and select Run All
-
-Alternatively, if you prefer using an IDE like Visual Studio Code, you can just open the notebook and press "Run all". Make sure the uv environment is active.
-
-You have succeeded when you see an output like this:     
-    ![alt text](https://github.com/brainiak/rtcloud-projects/raw/main/mindeye/docs/sample_jupyter_output.png "Sample Jupyter Output")
-
-## Next steps
-1. [`docs/quickstart_simulation.md`](docs/quickstart_simulation.md) to run real-time MindEye using simulated data streaming with RT-Cloud.
+1. [`docs/quickstart_simulation.md`](docs/quickstart_simulation.md) to run real-time MindEye analysis on a GPU using pre-collected data, without RT-Cloud dependency. Start here if you're new!
 2. [`docs/quickstart_realtime.md`](docs/quickstart_realtime.md) to use the full RT-Cloud functionality with MindEye, streaming data from an MRI scanner in real-time and analyzing it as it's being collected.
 
 ## Important Repositories
