@@ -1,21 +1,18 @@
-Note that the MindEye2 model requires a GPU to run, so the data analyzer component of RT-Cloud must be hosted on a GPU-enabled computer.
+# Quickstart for MindEye with RT-Cloud
+Stream pre-collected data with RT-Cloud to perform preprocessing and analysis in real-time.
 
-Prior to the (simulated) real-time session, we first pre-trained a MindEye2 model on a GPU with all data from subjects 2 through 8. Then, we fine-tuned the MindEye2 model on subject 1's day 1 data.
+## Introduction
 
-Having completed these preliminary steps, we can do (simulated) real-time reconstructions. The real-time analysis pipeline is all contained within the mindeye.py file.
 
-First, NIfTI images at each TR are streamed via the BIDS interface data streamer. In this project, we stream bold images from the first run of subject 1's day 2 session. That is, we fine-tuned on subject 1's day 1 session and we do reconstructions with the fine-tuned model on subject 1's day 2 session.
+## Prerequisites
+You must have completed the setup instructions in the [README](../README.md). You should also be able to run MindEye; see [`quickstart_simulation.md`](quickstart_simulation.md).
 
-Second, incoming NIfTI images are fed into a minimal pre-processing pipeline for quick reconstructions. The raw NIfTI images are motion corrected to the first TR of subject 1's day 2 run 1 by the FMRIB Software Library's (FSL) mcflirt function. Next, the motion corrected NIfTI images are aligned with the brain images from subject 1's day 1 session by a call to FSL's flirt function.
+This assumes you are familiar with the components of RT-Cloud. For example, you should know what the "data analyser" refers to. You should be able to run the sample project and the template project; see [documentation](https://github.com/brainiak/rt-cloud/tree/master?tab=readme-ov-file#realtime-fmri-cloud-framework).
 
-Immediately after the last TR of a stimulus trial, a simple Least-Squares Single (LSS) General Linear Model (GLM) is fit onto the cumulative data up until the current TR to acquire beta estimates for each voxel for the stimulus trial. Note that the last TR of a stimulus trial is estimated by assuming a 4.8 s HRF lag (3 TR's of 1.6 s). Furthermore, a TR is considered to be part of a stimulus trial when at least half of its duration is within the stimulus trial. The GLM model is implemented via the python package Nilearn's FirstLevelModel. The beta estimates are masked via a mask that is aligned with subject 1's day 1 session 1 brain and selects for voxels in and around the visual cortex. The masked beta estimates are then passed through the pre-trained and fine-tuned MindEye2 model to acquire image reconstructions and retrievals. The image reconstruction and retrieval process is described at length in the MindEye2 paper.
+Note that MindEye requires a GPU to run, so the data analyser component of RT-Cloud must be hosted on a GPU-enabled computer. 
 
-The mindeye.py file contains all of the code that goes from the streamed raw NIfTI file, to motion correction and alignment via FSL, to betas via Nilearn, and then to generating the images via the PyTorch machine learning library. MindEye2 computations are performed within the do_reconstructions and get_top_retrievals functions of the mindeye.py file. The output of do_reconstructions and get_top_retrievals is immediately sent to the analysis listener computer where it can modify the stimulus shown in PsychoPy in (simulated) real-time.
-
-**How to set up**
-
-1) 80GB of GPU space and 128 GB of CPU space are required for the data analyzer computer. The set up currently is designed for linux 64-bit intel computers and we are working on instructions for Windows and Mac.
-2) On a GPU-enabled computer, go to the directory where you want to place the rt-cloud folder with this project inside it, and then download [apptainer](https://apptainer.org/). Next, pull the latest rtcloud docker image into an apptainer file: 
+## Setup
+1. On a GPU-enabled computer, go to the directory where you want to place the rt-cloud folder with this project inside it, and then download [apptainer](https://apptainer.org/). Next, pull the latest rtcloud docker image into an apptainer file: 
     ```
     apptainer pull docker://brainiak/rtcloud:latest
     ```
@@ -63,15 +60,5 @@ The mindeye.py file contains all of the code that goes from the streamed raw NIf
 
 6) On your local computer, open the webinterface by going to [http://localhost:8882/](http://localhost:8882/). Then enter "test" for both the username and password and press run. Files will populate the outDir in the local rt-cloud directory via the analysis listener and the PsychoPy program will start displaying images once it receives the first TR's information.
 
-**Example PsychoPy Visuals of Real-Time Visual Image Retrieval**
-
+TODO include picture of connected rt-cloud browser
 When you run the project server via the webinterface and run PsychoPy which is waiting for input via the analysis listener, you will get images like below where we can see the actual ground truth image shown to participants compared to the top 5 retrievals. The MindEye2 model's most likely candidate image is directly adjacent to the grouth truth image. The model is retrieving the most likely candidate images from the pool of images given in the 63 stimuli trials in the run.
-
-![Example PsychoPy Display Image:](https://github.com/brainiak/rtcloud-projects/blob/main/mindeye/example_psychopy.png)
-**Under Construction**
-
-1) Display reconstructions in (simulated) real-time. 
-2) Create an easier set up procedure consisting of a single apptainer file with everything set up already.
-3) Improve reconstruction/retrieval peformance by utilizing the enhanced image feature of the MindEye2 model.
-4) Improve reconstruction/retrieval performance by improving bold image preprocessing through slice time correction and more sophisticated alignment methods.
-5) Create set up instructions for Mac and Windows.

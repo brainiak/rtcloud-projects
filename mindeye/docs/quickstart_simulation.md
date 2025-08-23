@@ -1,14 +1,10 @@
 # Quickstart for Simulated Real-Time MindEye
-Quickly set up and run simulated real-time image reconstruction using MindEye on pre-collected data.
+Set up and run simulated real-time image reconstruction using MindEye on pre-collected data.
 
-## Overview
-This quickstart guide will walk you through the setup to start producing real-time reconstructions using MindEye with data streaming using RT-Cloud. This assumes you have completed the setup instructions in the [README](../README.md) and are able to run MindEye in standalone form (without RT-Cloud).
+## Introduction
+This quickstart guide will walk you through the setup to start producing real-time reconstructions using MindEye with a GPU. This notebook uses pre-collected data to reproduce the real-time-compatible preprocessing and analysis previously performed in a real-time scan. This isolates the MindEye functionality from RT-Cloud, which enables real-time data streaming from an fMRI scanner.
 
-After you have completed the setup instructions above, you are ready to run real-time MindEye in simulation by running the Jupyter notebook at `scripts/mindeye.ipynb`. 
-
-We recommend starting with this step before proceeding to integrate MindEye with RT-Cloud, which requires a more involved setup. 
-* This notebook uses pre-collected data to reproduce the real-time-compatible preprocessing and analysis using a GPU
-* This is to test real-time MindEye without any dependency on RT-Cloud, which allows you to stream fMRI data 
+This assumes you have completed the setup instructions in the [README](../README.md). We recommend starting here to understand the preprocessing and analysis pipeline before proceeding to integrate MindEye with RT-Cloud, which requires a more involved setup. 
 
 ## Detailed Pipeline
 This is a description of the algorithm that we use to perform real-time image reconstructions and retrievals. We perform real-time analysis on Princeton subject 005 session 06. Our training data consists of subject 005 sessions 01-03 (sessions 04-05 were used for other purposes).
@@ -44,4 +40,4 @@ To run with minimal setup using uv (no IDE required): `uv run --with jupyter jup
 Alternatively, if you prefer using an IDE like Visual Studio Code, you can just open the notebook and press "Run all". Make sure the uv environment is active.
 
 You have succeeded when you see an output like this:     
-    ![alt text](https://github.com/brainiak/rtcloud-projects/raw/main/mindeye/docs/sample_jupyter_output.png "Sample Jupyter Output")
+![alt text](https://github.com/brainiak/rtcloud-projects/raw/main/mindeye/docs/sample_jupyter_output.png "Sample Jupyter Output")

@@ -17,6 +17,7 @@ Prior work relied on extensive processing of the [Natural Scenes Dataset](https:
 Going forward, our real-time visual decoding pipeline can potentially support a range of novel applications such as treatment of clinical conditions like depression (e.g., neurofeedback studies where participants are shown how their perception of an image differs from the ground truth image) and it can facilitate probing of fundamental learning mechanisms in the brain. 
 
 ## Pipeline
+For a more detailed walkthrough of the pipeline, see [Detailed Pipeline](docs/quickstart_simulation.md#detailed-pipeline) in `docs/quickstart_simulation.md`.
 1. Prior to the real-time session:
     1. Pre-train MindEye2 using data from multiple subjects collected using 7T fMRI from NSD
     2. Collect some data from a new participant in 3T fMRI
@@ -29,9 +30,9 @@ Going forward, our real-time visual decoding pipeline can potentially support a 
     4. Input this beta map into the fine-tuned MindEye2 model to generate image retrievals and/or reconstructions
 
 ## Prerequisites
-This has been primarily tested on Linux (RHEL and Rocky Linux 9.6). This requires familiarity with Python, git, and the command line. Specific code snippets that you should run will be formatted like `this`. Within code snippets, paths that might differ on your computer will be formatted like `<this>`.
+You'll need an internet connection, terminal access, and a GPU. This has been primarily tested on Linux (RHEL and Rocky Linux 9.6) with a NVIDIA RTX 6000 Ada Generation GPU (49GB VRAM). 
 
-You'll need an internet connection, terminal access, and a GPU. We'll install everything else (Git, Git LFS, Python, Python packages) along the way.
+This requires familiarity with Python, git, and the command line. We'll install everything else (Git, Git LFS, Python, Python packages) along the way. Specific code snippets that you should run will be formatted like `this`. Within code snippets, paths that might differ on your computer will be formatted like `<this>`.
 
 ## Setup
 In this section, we will set up git, install a uv environment, and clone repositories containing the analysis code, data, and large files.
@@ -94,10 +95,11 @@ We use [FSL](https://fsl.fmrib.ox.ac.uk/fsl/docs/#/) for real-time compatible pr
 
 ## Get started!
 1. [`docs/quickstart_simulation.md`](docs/quickstart_simulation.md) to run real-time MindEye analysis on a GPU using pre-collected data, without RT-Cloud dependency. Start here if you're new!
-2. [`docs/quickstart_realtime.md`](docs/quickstart_realtime.md) to use the full RT-Cloud functionality with MindEye, streaming data from an MRI scanner in real-time and analyzing it as it's being collected.
+2. [`docs/quickstart_realtime.md`](docs/quickstart_realtime.md) to use the full RT-Cloud functionality with MindEye, streaming data from an MRI scanner in real-time and analyzing it as it's being collected. Use this to prepare to run a real-time scan.
+3. [`docs/experiment_guide.md`](docs/experiment_guide.md) for instructions on how to run a real-time MindEye experiment on a new participant at your MRI facility.
 
 ## Important Repositories
-If you are planning to run your own real-time MindEye scans, here are additional repositories which you may find useful in preparing for and running the real-time session. 
+If you are planning to run your own real-time MindEye scans, here are additional repositories which you may find useful in preparing for and running the real-time session. More information can be found in [`docs/experiment_guide.md`](docs/experiment_guide.md).
 1. [`mindeye_task`](https://github.com/PrincetonCompMemLab/mindeye_task): contains all materials required to run NSD-like MindEye experiments with PsychoPy
 2. [`mindeye_preproc`](https://github.com/PrincetonCompMemLab/mindeye_preproc): contains scripts to preprocess offline data 
 3. [`mindeye_offline`](https://github.com/PrincetonCompMemLab/mindeye_offline): contains materials to fine-tune MindEye on preprocessed data in preparation for the real-time session
