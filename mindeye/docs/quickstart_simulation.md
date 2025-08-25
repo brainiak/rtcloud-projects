@@ -2,39 +2,63 @@
 Set up and run simulated real-time image reconstruction using MindEye on pre-collected data.
 
 ## Introduction
-This quickstart guide will walk you through the setup to start producing real-time reconstructions using MindEye with a GPU. This notebook uses pre-collected data to reproduce the real-time-compatible preprocessing and analysis previously performed in a real-time scan. This isolates the MindEye functionality from RT-Cloud, which enables real-time data streaming from an fMRI scanner, and the fMRI scanner itself. We recommend starting here to understand the real-time preprocessing and analysis pipeline before trying to integrate everything with RT-Cloud, which requires a more involved setup.
+This quickstart guide will walk you through the setup to start producing real-time reconstructions using MindEye with a GPU. This notebook uses pre-collected data to reproduce the real-time-compatible preprocessing and analysis previously performed in a real-time scan. This isolates the MindEye functionality from RT-Cloud (which enables real-time data streaming from an fMRI scanner). We recommend starting here to understand the real-time preprocessing and analysis pipeline before trying to integrate everything with RT-Cloud, which requires a more involved setup.
 
 This document assumes you have completed the setup instructions in the [README](../README.md).  
 
 ## Detailed Pipeline
-This is a description of the algorithm that we use to perform real-time image reconstructions and retrievals. We perform real-time analysis on Princeton subject 005 session 06. Our training data consists of subject 005 sessions 01-03 (sessions 04-05 were used for other purposes).
+This is a description of the algorithm that we use to perform real-time image reconstructions and retrievals. We perform real-time analysis on Princeton subject 005 session 06. Our training data consists of subject 005 sessions 01-03 (sessions 04-05 were used for other purposes). See the next section for a detailed description of the image stimuli used in the training and real-time sessions. 
 
-For the simulated real-time code provided here, note that all of step 1 has been done for you and the fully processed data are provided. (RISHAB MAYBE YOU CAN MAKE THIS SOUND BETTER)
+In the simulated real-time code provided here, all of the "prior to real-time" steps below have been completed for you; we provide the preprocessed data from previous scans, fine-tuned MindEye checkpoint, and union mask. The notebook performs all of the "real-time" steps.
 
 1. Prior to the real-time session:
-    1. MindEye was pre-trained on multiple subjects from NSD 7T data
-    2. We collected 3 sessions of 3T data from subject 005 (sessions 01-03). Each session involved viewing XX images (SHOULD WE INCLUDE INFO ABOUT # OF TRIALS, # OF IMAGES, # OF REPEATS?)
+    1. MindEye was pre-trained on NSD 7T data from multiple subjects
+    2. We collected 3 sessions of 3T data ("MindEye training scans") from subject 005 (sessions 01-03)
     3. Subject 005's data was preprocessed using fMRIPrep; all three sessions were preprocessed together resulting in all functional data in alignment with each other
         * We used the outputs in the subject's native T1 space for all analyses (space-T1w_bold)
-    4. Each session's preprocessed data was input to GLMsingle (independent of the other session RISHAB CAN YOU CHECK THAT THIS IS CORRECT) to obtain single-trial response estimates (betas) for each image-viewing trial
+    4. Each session's preprocessed data was separately input to GLMsingle to obtain single-trial response estimates (betas) for each image-viewing trial
     5. We estimated which voxels responded most reliably to visual images in each session, and then created a "union mask" with the most reliable voxels from each session: 
         * First, we took the NSDgeneral mask in MNI space provided with the NSD dataset and resampled to the subject's native T1w space
         * For each voxel within the subject's NSDgeneral mask, we computed reliability: the correlation of beta values across repeated image presentations (a "reliable voxel" should have consistent responses to the same image presented at different times)
-        * Computed the across-session correlation of voxel reliabilities at varying reliability thresholds (i.e., we correlated session 01 and 03 voxel reliabilities and separately correlated session 02 and 03 voxel reliabilities) 
+        * We computed the across-session correlation of voxel reliabilities at varying reliability thresholds (i.e., we correlated session 01 and 03 voxel reliabilities and separately correlated session 02 and 03 voxel reliabilities) 
         * For sessions 01 and 02, we independently choose the reliability threshold that maximized the correlation with session 03, resulting in two masks of voxels
         * We took the union of the two masks from the previous step; this "union mask" included all voxels that will be used to fine-tune MindEye and to be analyzed in a new real-time session
-    6. Apply the union mask to the betas from sessions 01-03 and fine-tune MindEye
-
-The simulated real-time code will perform the following pipeline steps: 
+    6. We applied the union mask to the betas from sessions 01-03 to fine-tune MindEye
+        * Note that this union mask is sub-optimal for any individual session, but this procedure was used both to limit the number of voxels that are processed (reduced feature dimensionality boosted performance in our testing using simulated real-time) and to capture potentially reliable voxels in the real-time session without knowing them ahead of time
 
 2. In real-time, stream in the functional data TR-by-TR. 
     1. To be done once at the beginning of the session: Use FLIRT to register the first functional volume of the real-time session to a BOLD reference volume from session 01 in space-T1w
-    2. At each TR, motion-correct the new functional volume to the first functional volume of the real-time session and then apply the previously calculated registration (NOTE TO RISHAB: DOES THIS HAPPEN FOR EACH TR OR ONLY TRs SELECTED FOR RECONSTRUCTION?)
-    3. If the current TR corresponds to an image (after accounting for the hemodynamic response function (HRF) NOTE: HOW MANY TRs or SECONDS AFTER IMAGE ONSET IS THIS?), run a simple GLM (implemented with nilearn) to deconvolve the HRF and produce a single-trial beta and append this to a running list
+    2. At each TR, motion-correct the new functional volume to the first functional volume of the real-time session and then apply the previously calculated registration
+    3. If the current TR corresponds to an image (after accounting for the hemodynamic response function (HRF) delay; assumed here to be on average 7.5s), run a simple GLM (implemented with nilearn) to deconvolve the HRF and produce a single-trial beta and append this to a running list
     4. If the current TR's data should be reconstructed:
-        * Z-score voxel-wise over all available betas (using a growing list of betas across all runs, so the mean and standard deviation become more stable as the session progresses)
-        * Run a forward pass through MindEye to generate retrievals and reconstructions based on the z-scored beta
+        * Z-score voxel-wise over all available betas
+            * We use a growing list of betas across all runs, so the mean and standard deviation estimates become more stable as the session progresses
+        * Run a forward pass through MindEye to generate retrievals and reconstructions based on the z-scored beta pattern
         * Plot MindEye's outputs
+
+## Stimuli for MindEye training scans
+Each MindEye training scan (sessions 01-03) involved viewing 693 images (11 functional runs of 63 images). We split the images into a train and test set of 569 and 124 images, respectively, distributed across all 11 runs. The order of presentation was psuedo-randomized with a constraint to prevent back-to-back repeated presentations of the same image.
+
+There were 531 unique images and 162 repeated images; the repeats were split between the train and test set, described further below. Repeated image presentations (from both the train and test sets; see [here](https://glmsingle.readthedocs.io/en/latest/wiki.html#i-noticed-that-glmsingle-involves-some-internal-cross-validation-is-this-a-problem-for-decoding-style-analyses-where-we-want-to-divide-the-data-into-a-training-set-and-a-test-set)) were used by GLMsingle to perform its optimizations via cross-validation. Repeats were also used to determine reliable voxels, as described above. We fine-tuned the model on the training set of betas from all three sessions simultaneously and used the held-out test set to evaluate our performance. 
+
+### Training set
+We use images from NSD, which itself sampled 73,000 images from [Microsoft COCO](https://link.springer.com/chapter/10.1007/978-3-319-10602-1_48). Fifty of the training images were shown a total of three times within each session. There were no repeated images from the training set across sessions. 
+
+### Testing set
+We use a combination of stimuli from [Wanjia et al. 2021](https://www.nature.com/articles/s41467-021-25126-0#Sec8) and [StyleGAN](http://github.com/NVlabs/stylegan) image variations of stimuli presented to NSD subject 1. We refer to our test set images as "MST pairs"; these are a set of 31 pairs of highly similar images (i.e. lighthouse 1 and lighthouse 2). 13 pairs come from Wanjia et al. 2021 and the other 18 pairs are from StyleGAN. 
+
+The MST images were shown twice each for a total of 124 images in the test set. These images were the same across sessions, and were always held-out during model training.
+
+We use similar pairmates rather than simply choosing a subset of random NSD images to enable further analysis of fine-grained representations. Accordingly, we introduce a retrieval metric, MST 2-alternative forced choice (MST 2-AFC), to evaluate MindEye's ability to discriminate between fMRI responses to these visually and semantically similar images. At an implementation level, this is identical to the retrieval operation, however the model now chooses between the image embeddings of just two pairmates rather than of the pool of all test-set images. 
+
+## Stimuli for real-time scan
+The real-time scan (session 06) consisted of 693 images. The first run of 63 images were previously unseen NSD images. These data were preprocessed and betas estimated in real-time, however reconstructions were not attempted. We included this "warm-up run" primarily to get a stable estimate of the mean and standard deviation of each voxel's beta patterns, used for z-scoring new beta patterns passed into MindEye. 
+
+The subsequent runs (2-11) contained pseudo-randomized presentations of the 62 MST images. We required that all 62 images were shown once each before any one was shown for the second time, twice each before any one was shown for the third time, and so on until we filled up all 693 images for the session. We estimated single-trial betas for each image as usual, however for repeated images, we averaged the beta patterns over all available repeats so far. 
+
+The rationale behind this ordering was to first enable evaluation of our pipeline on pure single-trial response estimates (using the first set of repeats) and then to observe potential improvements to our reconstructions obtained by trial averaging. 
+
+Due to the reconstruction lag – waiting for the hemodynamic response to peak, data processing and inference, and displaying the results – we limited the number of attempted reconstructions to 7 evenly spaced trials per run during the real-time session to prevent excessive wait time after the end of each functional run. Additionally, we stopped the session early after 5 functional runs. 
 
 ## How to run
 To run with minimal setup using uv (no IDE required): `uv run --with jupyter jupyter lab`, which opens a localhost instance of Jupyter Lab using the uv environment we installed previously 
