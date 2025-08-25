@@ -14,6 +14,7 @@ Please see the README within each project for a more detailed description and in
 - **functionalConnectivity**: Example project for providing feedback based on functional connectivity between two regions, based on [Ramot et al., (2017) _eLife_](https://elifesciences.org/articles/28974). Includes a working example of the "puzzle" feedback display from the referenced paper in PsychoPy.
 - **induction**: Example project for how to run an "induction" based design using RT-Cloud, including a PsychoPy display. Currently the feedback is based on functional connectivity, but could be adapted to any multivariate or univariate signal.
 - **mindeye**: Example of a computationally intensive project in RT-Cloud, using a GPU for real-time image reconstruction.
+- **movienf**: Example project for feedback during a movie stimulus.  Feedback is based on correlation to a target signal that discriminated between groups in a previously recorded training sample.  The movie is displayed in PsychoPy and paused after specific scenes to provide feedback
 - **openNeuroClient**: Example of how to stream a published data set from OpenNeuro through RT-Cloud.
 - **sample**: A small example project designed to test that your installation of RT-Cloud is working correctly, a useful tutorial.
 - **syntheticDataSample**: Another small example project, including an example of how to generate synthetic data for testing.
