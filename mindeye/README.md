@@ -14,6 +14,8 @@ The "ground truth" image was seen by the subject in the scanner. Viewing the ima
 
 Prior work relied on extensive processing of the [Natural Scenes Dataset](https://naturalscenesdataset.org/) (NSD), which collected 30-40 hours of data from each of a few participants. Additionally, NSD used 7 Tesla (7T) MRI which is available at only about 100 sites around the world. Our pipeline involves pre-training MindEye2 on data from NSD and then fine-tuning on just 2-3 hours of data, acquired at 3 Tesla (3T), from a new participant. After this, the model can support reconstruction and retrieval of images viewed by that participant in real-time.
 
+Note that we refer primarily to "reconstruction", but this should be interpreted to mean both reconstruction and retrieval unless specified otherwise. 
+
 ## General pipeline
 For a more detailed walkthrough of the pipeline, see [Detailed Pipeline](docs/quickstart_simulation.md#detailed-pipeline) in `docs/quickstart_simulation.md`.
 1. Prior to the real-time session:
