@@ -33,7 +33,7 @@ For a more detailed walkthrough of the pipeline, see [Detailed Pipeline](docs/qu
 ## Prerequisites
 You'll need an internet connection, terminal access, and a GPU. This has been primarily tested on Linux (RHEL and Rocky Linux 9.6) with a NVIDIA RTX 6000 Ada Generation GPU (49GB VRAM). 
 
-This requires familiarity with Python, git, and the command line. 
+This requires familiarity with Python, Git, and the command line. 
 
 We'll install required software (Git, Git LFS, Python, Python packages) along the way. 
 
