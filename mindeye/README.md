@@ -17,7 +17,7 @@ Prior work relied on extensive processing of the [Natural Scenes Dataset](https:
 Note that we refer primarily to "reconstruction", but this should be interpreted to mean both reconstruction and retrieval unless specified otherwise. 
 
 ## General pipeline
-For a more detailed walkthrough of the pipeline, see [Detailed Pipeline](docs/quickstart_simulation.md#detailed-pipeline) in `docs/quickstart_simulation.md`.
+For a more detailed walkthrough of the pipeline, see [Detailed Pipeline](docs/quickstart_simulation.md#detailed-pipeline) in [docs/quickstart_simulation.md](docs/quickstart_simulation.md).
 1. Prior to the real-time session:
     1. Pre-train MindEye2 using data from multiple subjects collected using 7T fMRI from NSD
     2. Collect ~3 hours of data from a new participant using 3T fMRI. Use these data to:
@@ -99,12 +99,15 @@ We use [FSL](https://fsl.fmrib.ox.ac.uk/fsl/docs/#/) for real-time compatible pr
     * The local copy that you update (`config/config.json`) will be automatically ignored by git (due to [.gitignore](.gitignore)). It is good practice to not track user-specific file paths with version control, since each user will have different file systems. 
 
 ## Get started!
-1. [`docs/quickstart_simulation.md`](docs/quickstart_simulation.md) to run a simulated real-time MindEye analysis on a GPU using pre-collected data from Princeton, without RT-Cloud dependency. Start here if you're new!
-2. [`docs/quickstart_realtime.md`](docs/quickstart_realtime.md) to use full RT-Cloud functionality with MindEye, including streaming pre-collected data from Princeton in real-time and analyzing the data as it comes in. Use this to prepare to run your own real-time scan.
-3. [`docs/experiment_guide.md`](docs/experiment_guide.md) for instructions on how to run a real-time MindEye experiment on a new participant at your MRI facility.
+We provide three guides, described below. The first two are quickstart guides which focus on specific code snippets for you to run and are intended to simplify the setup process. The third document is a procedural guide that provides an overview of the different components of the experiment. 
 
-## Important Repositories
-If you are planning to run your own real-time MindEye scans, here are additional repositories you may find useful. More information can be found in [`docs/experiment_guide.md`](docs/experiment_guide.md).
+If you just want to perform analysis on existing data, the first guide should suffice. If you are aiming to run your own real-time MindEye experiment, you should plan on building up to the third guide. We strongly recommend completing these in order. 
+1. [docs/quickstart_simulation.md](docs/quickstart_simulation.md) to run a simulated real-time MindEye analysis on a GPU using pre-collected data from Princeton, without RT-Cloud dependency. Start here if you're new!
+2. [docs/quickstart_realtime.md](docs/quickstart_realtime.md) to use full RT-Cloud functionality with MindEye, including streaming pre-collected data from Princeton in real-time and analyzing the data as it comes in. Use this to prepare to run your own real-time scan.
+3. [docs/experiment_guide.md](docs/experiment_guide.md) for instructions on how to run a real-time MindEye experiment on a new participant at your MRI facility.
+
+## Running your own real-time scan
+If you are planning to run your own real-time MindEye scans, here are additional repositories you may find useful. See [docs/experiment_guide.md](docs/experiment_guide.md) for an overview of all the components that go into preparing for and running the real-time scan.
 1. [`mindeye_task`](https://github.com/PrincetonCompMemLab/mindeye_task): contains all materials required to run NSD-like tasks with PsychoPy
 2. [`mindeye_preproc`](https://github.com/PrincetonCompMemLab/mindeye_preproc): contains scripts for offline data preprocessing in preparation for the real-time a real-time session
 3. [`mindeye_offline`](https://github.com/PrincetonCompMemLab/mindeye_offline): contains materials to fine-tune MindEye on offline preprocessed data in preparation for the real-time session
