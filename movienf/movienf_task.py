@@ -235,12 +235,11 @@ def session_info_terminal():
 # directories and config
 #---------------------------------------------------------
 project_dir = os.path.dirname(os.path.realpath(__file__))
-desktop_dir = "C:\Users\R.Goldstein\Desktop\movienf\psychopy_experiment"
 dicom_dir = os.path.join(project_dir, 'dicomDir')
 yoked_scores_path = os.path.join(project_dir, 'all_feedback.csv')
 yoked_subjects_path = os.path.join(project_dir, 'yoked_subjects.csv')
 # FIXME update to demo movie
-movie_path = os.path.join(project_dir, 'MORE_Trainspotting_Clip.mp4')  # Path to your movie file
+movie_path = os.path.join(project_dir, 'movie.mp4')  # Path to your movie file
 station_timing_path = os.path.join(project_dir, 'clf', 'stations.csv')  # Path to station timing file
 
 FEEDBACK_DURATION = 10.0  # Duration to show feedback bar in seconds
