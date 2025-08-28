@@ -2,24 +2,22 @@
 Collect data from a new participant, preprocess and fine-tune MindEye, and administer a real-time reconstruction scan. 
 
 ## Introduction
-This document will provide an overview of the necessary components for running the real-time MindEye experiment. We will not include detailed instructions on how to run the MindEye analysis or integrate MindEye with RT-Cloud, which are respectively covered in [quickstart_simulation.md](quickstart_simulation.md) and [quickstart_realtime.md](quickstart_realtime.md). Rather, we will focus on the surrounding steps, which include preparing the stimuli to be shown to the participant in the scanner, data preprocessing and analysis, and considerations for the real-time scan.
+This document will provide an overview of the necessary components for running the real-time MindEye experiment. We will not include detailed instructions on how to run the MindEye analysis or integrate MindEye with RT-Cloud, which are respectively covered in [01-quickstart_simulation.md](01-quickstart_simulation.md) and [02-quickstart_realtime.md](02-quickstart_realtime.md). Rather, we will focus on the surrounding steps, which include preparing the stimuli to be shown to the participant in the scanner, data preprocessing and analysis, and considerations for the real-time scan.
 
 Specific implementation-level details (such as code snippets) may be mentioned in this document or in the linked repositories, some of which reference the specific setup used at Princeton, such as computing clusters and MRI configurations. These are included for reference as usage examples, but institutional specifics should be changed accordingly. 
 
 ## Prerequisites
-You must have completed the setup instructions: [README](../README.md) and the quickstart guides: [quickstart_simulation.md](quickstart_simulation.md) and [quickstart_realtime.md](quickstart_realtime.md). We assume familiarity with the concepts from these documents including references to file paths.
+You must have completed the setup instructions in the [README](../README.md) and the quickstart guides: [01-quickstart_simulation.md](01-quickstart_simulation.md) and [02-quickstart_realtime.md](02-quickstart_realtime.md). We assume familiarity with the concepts from these documents including references to file paths. You should be familiar with the pipeline; see [00-pipeline.md](00-pipeline.md) for a refresher.
 
 The data analyser component of RT-Cloud must be hosted on a GPU-enabled computer. You must have a way to stream files from your MRI scanner onto this computer. This has been tested at Princeton using a Siemens Prisma 3T scanner with a physical connection to a GPU workstation (located in the control room). However, many other configurations are possible, including the use of cloud-based analysis. 
 
 ## Preparing for a new participant
-Refer to the [mindeye_task](https://github.com/PrincetonCompMemLab/mindeye_task) repository for information on task design and stimulus presentation. The repository provides scripts to copy existing condition files or generate new image curricula for each participant. It also includes setup instructions for running the task in PsychoPy and standardized instructions to read to participants. 
+Refer to the [mindeye_task](https://github.com/PrincetonCompMemLab/mindeye_task) repository for information on task design and stimulus presentation. The repository provides scripts to copy existing conditions files or generate new image curricula for each participant. It also includes setup instructions for running the task in PsychoPy and standardized instructions to read to participants. 
 
 ## Preprocessing and fine-tuning MindEye
-See [Detailed Pipeline](docs/quickstart_simulation.md#detailed-pipeline) for a review of the pipeline. Refer to the [mindeye_preproc](https://github.com/PrincetonCompMemLab/mindeye_preproc/tree/main) repository for sample command-line snippets and scripts for preprocessing with fMRIPrep and GLMsingle on Princeton research clusters.
+Refer to the [mindeye_preproc](https://github.com/PrincetonCompMemLab/mindeye_preproc/tree/main) repository for sample command-line snippets and scripts for preprocessing with fMRIPrep and GLMsingle on Princeton research clusters. This includes instructions on generating the subject-specific NSDgeneral mask and getting the betas to fine-tune MindEye.
 
-TODO add reference to mindeye_offline with links to the appropriate notebooks
-
-TODO add section on making the union mask with links to the appropriate notebooks
+Refer to the [mindeye_offline](https://github.com/PrincetonCompMemLab/mindeye_offline) repository for instructions on making the union mask from multiple sessions and fine-tuning MindEye based on that mask.
 
 ## Preparing for the real-time scan
 We strongly recommend running a real-time test scan using a dummy such as an MRI phantom. Based on the connection between the MRI machine and your analysis computer, you may need to identify where newly streamed DICOM volumes are being sent, how to access them, and any scanner-specific naming schemes for these volumes. 
@@ -31,9 +29,7 @@ For example, at Princeton, the scanner interface has an "RT Start" option which 
 ## Running the real-time scan
 
 ### 1. Before you start: Edit mindeye.py and set session variables
-
-
-Before launching the data analyser, open `mindeye.py` and check/update the following variables for your session:
+Before launching the data analyser, open `mindeye.py` and check/update the following variables for your session. Note that exact values (such as `dicomNamePattern`) might differ depending on your institution.
 
 * `model_name`
 * `num_voxels` (e.g., 8627 if using union mask from ses-01-02)

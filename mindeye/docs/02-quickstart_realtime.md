@@ -2,12 +2,12 @@
 Stream pre-collected data with RT-Cloud and perform preprocessing and analysis in real-time.
 
 ## Introduction
-
+This quickstart guide will walk you through the process of integrating MindEye with RT-Cloud to stream data and work with the different components of RT-Cloud. Similar to [01-quickstart_simulation.md](01-quickstart_simulation.md), we will use pre-collected data to reproduce the real-time-compatible preprocessing and analysis previously performed in a real-time scan. 
 
 ## Prerequisites
-You must have completed the setup instructions in the [README](../README.md). You should also be able to run MindEye; see [quickstart_simulation.md](quickstart_simulation.md). The instructions here will rely on file paths and other terms defined in these documents.
+You must have completed the setup instructions in the [README](../README.md). You should also be able to run MindEye; see [01-quickstart_simulation.md](01-quickstart_simulation.md). The instructions here will rely on file paths and other terms defined in these documents.
 
-You should be able to run the sample project and the template project listed in the [RT-Cloud documentation](https://github.com/brainiak/rt-cloud/tree/master?tab=readme-ov-file#realtime-fmri-cloud-framework).
+You should follow the RT-Cloud installation instructions and be able to run the sample project and the template project listed in the [RT-Cloud documentation](https://github.com/brainiak/rt-cloud/tree/master?tab=readme-ov-file#realtime-fmri-cloud-framework).
 
 Note that MindEye requires a GPU to run, so the data analyser component of RT-Cloud must be hosted on a GPU-enabled computer. 
 
@@ -24,7 +24,7 @@ Note that MindEye requires a GPU to run, so the data analyser component of RT-Cl
 ### PsychoPy (to display reconstructions)
 This refers to the PsychoPy instance that watches for reconstruction outputs written by RT-Cloud and displays the reconstructions to the experimenters. Currently, the reconstructions are not displayed to the participant in the scanner, which is an area for improvement. 
 
-Note: This means that in the current setup, there are two different instances of PsychoPy running in the real-time scan. First is the instance that displays reconstructions to the experimenter, described here. Second is the instance that displays images to the participant in the scanner. In this guide, we focus on setting up RT-Cloud using pre-collected data, so the latter is not needed. Instructions for running a real participant are located in [experiment_guide.md](experiment_guide.md), which we suggest proceeding to once you are comfortable with the contents of both [quickstart_simulation.md](quickstart_simulation.md) and this document.
+Note: This means that in the current setup, there are two different instances of PsychoPy running in the real-time scan. First is the instance that displays reconstructions to the experimenter, described here. Second is the instance that displays images to the participant in the scanner. In this guide, we focus on setting up RT-Cloud using pre-collected data, so the latter is not needed. Instructions for running a real participant are located in [03-experiment_guide.md](03-experiment_guide.md), which we suggest proceeding to once you are comfortable with the contents of both [01-quickstart_simulation.md](01-quickstart_simulation.md) and this document.
 
 1. On your local laptop/computer which you are going to display PsychoPy on, clone the rtcloud-projects repository: `cd <path/to/directory>` and `git clone https://github.com/brainiak/rtcloud-projects.git`
 2. Download this /mindeye/ projects folder from the rt-cloud-projects repository and place it in the projects folder of the rt-cloud repository both locally on the PsychoPy display computer and on the GPU-enabled data analyzer computer.
@@ -57,4 +57,5 @@ Note: This means that in the current setup, there are two different instances of
 6) On your local computer, open the webinterface by going to [http://localhost:8882/](http://localhost:8882/). Then enter "test" for both the username and password and press run. Files will populate the outDir in the local rt-cloud directory via the analysis listener and the PsychoPy program will start displaying images once it receives the first TR's information.
 
 TODO include picture of connected rt-cloud browser
-When you run the project server via the webinterface and run PsychoPy which is waiting for input via the analysis listener, you will get images like below where we can see the actual ground truth image shown to participants compared to the top 5 retrievals. The MindEye2 model's most likely candidate image is directly adjacent to the grouth truth image. The model is retrieving the most likely candidate images from the pool of images given in the 63 stimuli trials in the run.
+
+TODO include picture of PsychoPy waiting screen and reconstruction display
