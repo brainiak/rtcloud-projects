@@ -12,12 +12,12 @@ During movie scenes with stations to be analyzed, a green border appears around 
 ### Reference scan
 At the beginning of each visit, a 30 second resting scan is collected to be used as a reference for motion correction and transforming pre-trained voxel weights from MNI to subject functional space. For the purposes of the demo, the reference volume and weights are provided in subject functional space in the referenceDir
 ### Real-time analysis
-    * real-time dicoms are detected and bidsified with rt-cloud
-    * motion correction to the reference volume
-    * Z-score, based on a running mean and standard deviation
-    * If a real-time TR is within a station, the pre-trained linear voxel transform is applied to yield a scalar, which is appended to the 1D time series for the current station
-    * At the end of the station, the resulting 1D time series is passed to a pre-trained classifier for that station and a feedback score is computed based on correlation with the pre-trained target group template
-    * At the end of the scene, the movie is paused to display the feedback scores
+* real-time dicoms are detected and bidsified with rt-cloud
+* motion correction to the reference volume
+* Z-score, based on a running mean and standard deviation
+* If a real-time TR is within a station, the pre-trained linear voxel transform is applied to yield a scalar, which is appended to the 1D time series for the current station
+* At the end of the station, the resulting 1D time series is passed to a pre-trained classifier for that station and a feedback score is computed based on correlation with the pre-trained target group template
+* At the end of the scene, the movie is paused to display the feedback scores
 ## Dataset
 * dicomDir
     * 1229 dicoms with TR=1s
@@ -27,8 +27,8 @@ At the beginning of each visit, a 30 second resting scan is collected to be used
 * clf
     * station_models
         * .joblib files containing pre-trained templatematch classifier objects for each station
-        * stations.csv
-            * Onset and offset TRs and movie frames for each station/scene
+    * stations.csv
+        * Onset and offset TRs and movie frames for each station/scene
 
 ## Run instructions
 The project assumes there is a task machine for displaying the PsychoPy task and a separate analysis machine for running real-time analysis of fMRI data.  The task and analysis machines communicate by reading and writing feedback.txt files on a shared network drive
