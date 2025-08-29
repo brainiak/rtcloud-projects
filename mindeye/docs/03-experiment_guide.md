@@ -24,7 +24,7 @@ We strongly recommend running a real-time test scan using a dummy such as an MRI
 
 For example, at Princeton, the scanner interface has an "RT Start" option which mounts a drive from the GPU workstation on the MRI reconstruction computer. Subsequently, new DICOM volumes will appear in these directories during the scan (located at `/home/scontrol/` on Prisma and `/Data1/subjects/` on Skyra).
 
-
+If you would like to generate new conditions files for the real-time scan, refer to [mindeye_task](https://github.com/PrincetonCompMemLab/mindeye_task) for instructions. Once you have made the new files, place the session's csv file in `</path/to/rtcloud-projects/mindeye/3t/data/events/csv>`. Refer to the scripts in `</path/to/rtcloud-projects/mindeye/3t/scripts>`. Run `csv_to_events.py` to create an events file which is used to fit the GLM. You will also need to run `make_tr_labels.py` to create a TR labels file which describes when each trial should be reconstructed after accounting for HRF delay.
 
 ## Running the real-time scan
 
