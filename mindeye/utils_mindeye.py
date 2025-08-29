@@ -646,7 +646,7 @@ def calculate_mst_2afc(all_brain_emb, all_clip_emb, clip_img_embedder, csv_path,
     if MST_idx is not None and all_image_names is not None:
         mst_names = all_image_names[MST_idx]
         assert len(MST_idx) == len(all_brain_emb), f"MST_idx length mismatch"
-        assert len(all_brain_emb) % 2 == 0, f"Need even number of embeddings for pairing"
+        assert len(all_brain_emb) % 2 == 0, f"need even number of embeddings for pairing"
         
         num_pairs = len(all_brain_emb) // 2
         for i in range(num_pairs):
@@ -673,14 +673,8 @@ def calculate_mst_2afc(all_brain_emb, all_clip_emb, clip_img_embedder, csv_path,
         all_brain_norm = torch.nn.functional.normalize(all_brain_emb.flatten(1), dim=-1)
         all_clip_norm = torch.nn.functional.normalize(all_clip_emb.flatten(1), dim=-1)
         
-
-        num_images = len(all_brain_norm)
-        if num_images % 2 != 0:
-            print(f"Warning: Odd number of images ({num_images}). Skipping last image.")
-            num_images -= 1
-        
         num_pairs = num_images // 2
-        print(f"Testing {num_pairs} pairs")
+        print(f"testing {num_pairs} pairs")
         
         correct = 0
         total = 0
