@@ -47,7 +47,15 @@ These instructions should be performed on the computer on which you would like t
    cd </path/to/directory>  # Navigate to the directory where you want to clone the repo
    git clone https://github.com/brainiak/rtcloud-projects.git
    ```
-2. Change the absolute_path variable in the rt-cloud/projects/mindeye/psychopy_example/rtcloud_psychopy.py file on your PsychoPy display local computer to the absolute path location of your rt-cloud folder you set up locally in (3). TODO change this to consolidate repos, rn it's using rt_mindeye/rt-cloud/outDir locally (?) which is pretty useless. probably should make the output dir in 3t derivatives so it can be saved to HF.
+2. Clone the `rt-cloud` repository locally and set up the symbolic link for the `mindeye` project, just as you did on the GPU-enabled computer:
+   ```
+   cd </path/to/directory>  # Navigate to where you want to clone rt-cloud
+   git clone https://github.com/brainiak/rt-cloud.git
+   cd rt-cloud/projects
+   ln -s </path/to/rtcloud-projects/mindeye> mindeye
+   # Now rt-cloud/projects/mindeye is a link to your local rtcloud-projects/mindeye
+   ```
+3. In the `rt-cloud/projects/mindeye/psychopy_example/rtcloud_psychopy.py` file on your local PsychoPy display computer, update the `absolute_path` variable to the absolute path of your local `rt-cloud` folder (the one you just cloned). This ensures the PsychoPy script can correctly locate all necessary files.
 
 ## Run it!
 1) On the GPU-enabled computer,
@@ -55,7 +63,7 @@ These instructions should be performed on the computer on which you would like t
       * The --nv flag stands for "NVIDIA" and allows the container to access the GPU.
    * Go to the rt-cloud directory: `cd </path/to/rt-cloud>`
    * Run the bash script we modified earlier: `source bashrc_mindeye`
-      * This is necessary to set up the FSL path and will also activate 
+      * This is necessary to set up the FSL path and will also activate the uv environment.
    * Then run the project server/data analyzer
      ```
      bash scripts/data_analyser.sh -p mindeye --port 8898 --subjectRemote --test
@@ -66,15 +74,22 @@ These instructions should be performed on the computer on which you would like t
    ssh -L 8892:hostname:8898 [username]@[server-name]
    ```
    where hostname is the hostname of the GPU-enabled compute node. This is how we allow the data analyzer on the GPU-enabled computer on a server to send information to your local computer via the analysis listener which then becomes input for PsychoPy.
-4) In terminal on your PsychoPy display computer locally, cd into the rt-cloud directory from set up (3). Activate the local rtcloud anaconda environment. Run the analysis listener start up:
+4) In terminal on your PsychoPy display computer locally, navigate to the rt-cloud directory: `cd </path/to/rt-cloud>`. Activate the local rtcloud conda environment. Run the analysis listener start up:
    ```
    WEB_IP=localhost
    bash scripts/analysis_listener.sh -s $WEB_IP:8892  --test
    ```
+5) Open a new terminal locally on your PsychoPy display computer. Navigate to the PsychoPy directory, activate the `rtcloud` environment, and run the PsychoPy script:
 
-5) Open a new terminal locally on your PsychoPy display computer. cd into the rt-cloud directory from set up (3) and then go to the following path: ```projects/mindeye/psychopy_example/```. Activate the rtcloud environment and run ```python rtcloud_psychopy.py```. This will open up the PsychoPy program which starts waiting for incoming output from the data analyzer that reaches your computer through the analysis listener. Output coming in from the real-time analysis of the fMRI data can then modify the stimuli given to your participant through the PsychoPy program. 
+   ```bash
+   cd </path/to/rt-cloud/projects/mindeye/psychopy_example/>
+   conda activate rtcloud
+   python rtcloud_psychopy.py
+   ```
 
-6) On your local computer, open the webinterface by going to [http://localhost:8882/](http://localhost:8882/). Then enter "test" for both the username and password and press run. Files will populate the outDir in the local rt-cloud directory via the analysis listener and the PsychoPy program will start displaying images once it receives the first TR's information.
+   This will open the PsychoPy program, which will start waiting for incoming output from the data analyser via the analysis listener. Output from the real-time analysis of the fMRI data can then modify the stimuli presented to your participant through the PsychoPy program.
+
+6) On your local computer, open the webinterface by going to [http://localhost:8892/](http://localhost:8892/). Then enter "test" for both the username and password and press run. Files will populate the outDir in the local rt-cloud directory via the analysis listener and the PsychoPy program will start displaying images once it receives the first TR's information.
 
 TODO include picture of connected rt-cloud browser
 

@@ -42,12 +42,12 @@ def np_to_Image(x):
 
 
 # Specify analysis_listener outputs folder
-absolute_path = "/Volumes/norman/rsiyer/rt_mindeye" # TODO fill this in where your rt-cloud directory is cloned on your analysis listener computer
+absolute_path = "/Volumes/norman/rsiyer" # TODO fill this in where your rt-cloud directory is cloned on your analysis listener computer
 outPath = f"{absolute_path}/rt-cloud/outDir"
 recons_or_retrievals = "ret"
 # Setup variables
-starting_TR = 0
-end_TR = 192
+start_TR = 0
+end_TR = 191
 numRuns = 11
 
 # Setup the Window
@@ -68,8 +68,7 @@ win.flip()
 for run in range(1, numRuns+1):
     print(f"run {run}")
     # go through each TR
-    for TR in range(0, 191):
-        # print('starting with TR 35 for debugging')
+    for TR in range(start_TR, end_TR):
         print(f"TR {TR}")
         filename = f'{outPath}/run{run}_TR{TR}.json'
         print("filename: ", filename)
