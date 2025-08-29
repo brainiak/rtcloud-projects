@@ -1,3 +1,4 @@
+conf/bashrc_mindeye
 mindeye.ipynb
 BidsDir/
 .Rhistory
@@ -5,7 +6,7 @@ BidsDir/
 rt_all_data/
 mindeye/.Rhistory
 .ipynb_checkpoints/
-config/config.json
+conf/config.json
 .venv
 
 # Byte-compiled / optimized / DLL files
