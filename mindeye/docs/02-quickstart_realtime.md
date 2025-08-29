@@ -13,9 +13,9 @@ Note that MindEye requires a GPU to run, so the data analyser component of RT-Cl
 
 ## Setup
 ### Data analyser
-1. Check if [apptainer](https://apptainer.org/) is installed: `apptainer --version`. If not, see [documentation](https://apptainer.org/docs/user/main/quick_start.html).
-2. Check that the RT-Cloud docker container `rtcloud_latest.sif` exists in `<path/to/rt_all_data>`. Alternatively, pull the latest rtcloud docker image using apptainer: `apptainer pull docker://brainiak/rtcloud:latest`. 
-3. Download the rt-cloud repository into your GPU-enabled computer like you did locally in (3). TODO do we have to copy the rtcloud-projects/mindeye folder into rt-cloud/projects? isn't it easier without? if not, leave it as is and make sure the projects/mindeye directory is ignored by rt-cloud for potential future pushes from rt-cloud on local
+1. Check if [apptainer](https://apptainer.org/) is installed: `apptainer --version`. If not, see [instructions](https://apptainer.org/docs/user/main/quick_start.html).
+2. Check that the RT-Cloud docker container `rtcloud_latest.sif` exists in `<path/to/rt_all_data>`. Alternatively, pull the latest rtcloud docker image using apptainer: `apptainer pull docker://brainiak/rtcloud:latest`.
+3. Download the rt-cloud repository into your GPU-enabled computer: `git clone https://github.com/brainiak/rt-cloud`
 4. Verify that `scripts/mindeye.py` exists on your GPU-enabled computer. Ensure that `config/config.json` has accurate paths for your system and is referenced accurately by the Python script.
 5. From this /mindeye/ folder, get the bidsRun.py file and replace the bidsRun.py file within rt-cloud/rtCommon on your GPU-enabled computer with this new version of the bidsRun.py file set up particularly for this project. TODO again, figure out if we can get away without. if not, should add bidsRun.py to gitignore in rt-cloud
 6. On the GPU-enabled computer, create a conda environment by downloading the rt_mindEye2.yml file from this /mindeye/ folder then run: ```conda env create -f rt_mindEye2.yml``` TODO replace with uv env from previous notebook and test that it works. TODO delete all refs to this conda env and ensure it isn't secretly being called anywhere in the repo, for example by the bashrc_mindeye

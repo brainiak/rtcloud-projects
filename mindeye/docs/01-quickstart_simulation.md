@@ -2,7 +2,11 @@
 Set up and run simulated real-time image reconstruction using MindEye on pre-collected data.
 
 ## Introduction
-This quickstart guide will walk you through the setup to start producing real-time reconstructions using MindEye with a GPU. This notebook uses pre-collected data to reproduce the real-time-compatible preprocessing and analysis previously performed in a real-time scan. This isolates the MindEye functionality from RT-Cloud (which enables real-time data streaming from an fMRI scanner). We recommend starting here to understand the real-time preprocessing and analysis pipeline before trying to integrate everything with RT-Cloud, which requires a more involved setup.
+This quickstart guide will walk you through the setup to start producing real-time reconstructions using MindEye with a GPU. 
+
+This notebook uses pre-collected data to reproduce the real-time-compatible preprocessing and MindEye analysis steps that we had previously performed during one of our real-time scans at Princeton; importantly, the analysis steps in this notebook can be run without installing RT-Cloud (if you wanted to conduct actual real-time data streaming from an fMRI scanner, you would have to install RT-Cloud). 
+
+We recommend starting here to understand the real-time preprocessing and analysis pipeline before trying to integrate everything with RT-Cloud, which requires a more involved setup.
 
 ## Prerequisites
 This document assumes you have completed the setup instructions in the [README](../README.md). Refer to [00-pipeline.md](00-pipeline.md) for a detailed description of the MindEye pipeline and its components.

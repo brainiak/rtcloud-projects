@@ -20,10 +20,9 @@ To run your own real-time analysis, you will additionally need to complete the "
         * For each voxel within the subject's NSDgeneral mask, we computed reliability: the correlation of beta values across repeated image presentations (a "reliable voxel" should have consistent responses to the same image presented at different times)
         * We computed the across-session correlation of voxel reliabilities at varying reliability thresholds (i.e., we correlated session 01 and 03 voxel reliabilities and separately correlated session 02 and 03 voxel reliabilities) 
         * For sessions 01 and 02, we independently choose the reliability threshold that maximized the correlation with session 03, resulting in two masks of voxels
-        * We took the union of the two masks from the previous step; this "union mask" included all voxels that will be used to fine-tune MindEye and to be analyzed in a new real-time session
+        * We took the union of the two masks from the previous step; all subsequent MindEye analyses (fine-tuning the model on sessions 01-03, testing the model in real time on session 06) were limited to this “union mask”
     6. We applied the union mask to the betas from sessions 01-03 to fine-tune MindEye
-        * Note that this union mask is sub-optimal for any individual session, but this procedure was used both to limit the number of voxels that are processed (reduced feature dimensionality boosted performance in our testing using simulated real-time) and to capture potentially reliable voxels in the real-time session without knowing them ahead of time
-
+        * Note: our prior explorations of MindEye showed that limiting the analysis to reliable voxels substantially boosts MindEye performance. In the procedure outlined here, we set out to identify which voxels were reliable based on the training data (sessions 01-03) alone. This way, we could set our mask and conduct the time-consuming process of fine-tuning the model on the training data before the start of real-time testing. 
 2. In real-time, stream in the functional data TR-by-TR. 
     1. To be done once at the beginning of the session: Use FLIRT to register the first functional volume of the real-time session to a BOLD reference volume from session 01 in space-T1w
     2. At each TR, motion-correct the new functional volume to the first functional volume of the real-time session and then apply the previously calculated registration
