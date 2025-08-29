@@ -541,7 +541,7 @@ def get_mst_pairs(mst_pairs_dir):
     return mst_pairs
 
 
-def calculate_retrieval_metrics(all_clip_voxels, all_images, csv_path):
+def calculate_retrieval_metrics(all_clip_voxels, all_images, csv_path, MST_idx=None, all_image_names=None):
 
     try:
         clip_img_embedder
@@ -592,7 +592,7 @@ def calculate_retrieval_metrics(all_clip_voxels, all_images, csv_path):
         bwd_acc = topk(all_bwd_sim, all_labels, k=1).item()
 
     # calculate mst 2afc
-    mst_2afc_score = calculate_mst_2afc(all_emb_, all_emb, clip_img_embedder, csv_path)
+    mst_2afc_score = calculate_mst_2afc(all_emb_, all_emb, clip_img_embedder, csv_path, MST_idx, all_image_names)
 
     return fwd_acc, bwd_acc, mst_2afc_score
 
@@ -637,11 +637,34 @@ def load_mst_mapping_from_tr_labels(
 def find_all_indices(lst, item):
     return [i for i, x in enumerate(lst) if x == item]
 
-def calculate_mst_2afc(all_brain_emb, all_clip_emb, clip_img_embedder, csv_path):
+def calculate_mst_2afc(all_brain_emb, all_clip_emb, clip_img_embedder, csv_path, MST_idx=None, all_image_names=None):
 
-    # assumes input contains paired images in sequence like 0-1, 2-3, 4-5 ...
     import torch
     import numpy as np
+    import re
+    
+    if MST_idx is not None and all_image_names is not None:
+        mst_names = all_image_names[MST_idx]
+        assert len(MST_idx) == len(all_brain_emb), f"MST_idx length mismatch"
+        assert len(all_brain_emb) % 2 == 0, f"Need even number of embeddings for pairing"
+        
+        num_pairs = len(all_brain_emb) // 2
+        for i in range(num_pairs):
+            name_a = str(mst_names[i*2])
+            name_b = str(mst_names[i*2+1])
+            
+            match_a = re.search(r'pair_(\d+)_(\d+)_(\d+)', name_a)
+            match_b = re.search(r'pair_(\d+)_(\d+)_(\d+)', name_b)
+            
+            # assert both are pair_X_Y_Z 
+            assert match_a, f"image A not pair format: {name_a}"
+            assert match_b, f"image B not pair format: {name_b}"
+            
+            # assert same pair number (x_y part)
+            pair_a = f"{match_a.group(1)}_{match_a.group(2)}"
+            pair_b = f"{match_b.group(1)}_{match_b.group(2)}"
+            assert pair_a == pair_b, f"not pairmates: {name_a} (pair {pair_a}) vs {name_b} (pair {pair_b})"
+    print("exited")
     
     try:
         print(f"mst 2afc: processing {len(all_brain_emb)} input embeddings")
