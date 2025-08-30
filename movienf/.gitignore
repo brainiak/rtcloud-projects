@@ -1,0 +1,4 @@
+dicomDir/*
+clf/*
+referenceDir/*
+*.dcm
