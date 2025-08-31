@@ -36,7 +36,7 @@ These instructions should be performed on the GPU-enabled computer from which yo
    > You should see something like "(mindeye) Apptainer>" at the command prompt if the environment was activated. Run `flirt -version` to verify that FSL commands are available.
 
 ### PsychoPy (to display reconstructions)
-This refers to the PsychoPy instance that waits for RT-Cloud to write the reconstruction output json files, reads and decodes them, and then displays the reconstructions to the experimenters. Currently, the reconstructions are not displayed to the participant in the scanner, which is an area for improvement.
+This refers to the PsychoPy instance that waits for RT-Cloud to write the reconstruction output json files, reads and decodes them, and then displays the reconstructions to the experimenters. Currently, the reconstructions are not displayed to the participant in the scanner.
 
 > Note: This means that in the current setup, there are two different instances of PsychoPy running in the real-time scan. First is the instance that displays reconstructions to the experimenter, described here. Second is the instance that displays images to the participant in the scanner. In this guide, we focus on setting up RT-Cloud using pre-collected data, so the latter is not needed. 
 
@@ -74,7 +74,7 @@ These instructions should be performed on the computer on which you would like t
    ssh -L 8892:hostname:8898 [username]@[server-name]
    ```
    where hostname is the hostname of the GPU-enabled compute node. This is how we allow the data analyzer on the GPU-enabled computer on a server to send information to your local computer via the analysis listener which then becomes input for PsychoPy.
-4) In terminal on your PsychoPy display computer locally, navigate to the rt-cloud directory: `cd </path/to/rt-cloud>`. Activate the local rtcloud conda environment. Run the analysis listener start up:
+4) In the terminal on your PsychoPy display computer locally, navigate to the rt-cloud directory: `cd </path/to/rt-cloud>`. Activate the local rtcloud conda environment. Run the analysis listener start up:
    ```
    WEB_IP=localhost
    bash scripts/analysis_listener.sh -s $WEB_IP:8892  --test

@@ -67,7 +67,7 @@ We use uv, a fast Python package manager ([documentation](https://github.com/ast
     * Verify install using `uv --version`
         * You may need to run `source $HOME/.local/bin/env` for uv to be a recognized command
 2. Create the environment
-    1. `cd rtcloud-projects/mindeye/config`
+    1. `cd rtcloud-projects/mindeye/conf`
     2. Run: `uv sync`. This will: 
         * Install the Python version specified in .python-version
         * Install all dependencies from pyproject.toml pinned by uv.lock
