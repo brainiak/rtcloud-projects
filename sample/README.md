@@ -1,6 +1,7 @@
 # The Sample Project
-
-**Note September 2025** We encourage new users to start with the [quick start installation guide and basic usage tutorial](https://github.com/brainiak/rt-cloud?tab=readme-ov-file#rtcloud-installation--usage) found on the main RT-Cloud github. This sample project is older and remains available for posterity.
+---
+**Note September 2025** We encourage new users to start with the [quick start installation guide and basic usage tutorial](https://github.com/brainiak/rt-cloud?tab=readme-ov-file#tutorial-rtcloud-installation--usage) found on the main RT-Cloud github. This sample project is older and remains available for posterity.
+---
 
 The purpose of this sample project is to familiarize you with the tools that are available to you through our **Realtime fMRI Cloud Framework**. In these scripts, we will walk you through a rudimetary project example where we will:
 

@@ -1,3 +1,3 @@
-#Template project
+Template project
 ---
 This template project is the recommended starting place for validating your RT-Cloud installation as well as understanding the structure of an RT-Cloud project. Please see the associated [installation instructions](https://github.com/brainiak/rt-cloud?tab=readme-ov-file#1-install-docker-singularity-or-miniconda) and detailed [quick start tutorial](https://github.com/brainiak/rt-cloud?tab=readme-ov-file#4-run-rtcloud-experiment-template-project) on the main RT-Cloud github repo: https://github.com/brainiak/rt-cloud
