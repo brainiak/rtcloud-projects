@@ -73,7 +73,7 @@ We use uv, a fast Python package manager ([documentation](https://github.com/ast
         * Install all dependencies from pyproject.toml pinned by uv.lock
 3. Activate the environment
     1. `source .venv/bin/activate`
-    2. Check the Python version: `python --version`; it should match the version listed in the file `.python_version` located in the config folder
+    2. Check the Python version: `python --version`; it should match the version listed in the file `.python_version` located in the conf folder
     3. You can use the command `deactivate` to deactivate the environment
 
 ### Installing FSL
@@ -93,12 +93,12 @@ We use [FSL](https://fsl.fmrib.ox.ac.uk/fsl/docs/#/) for real-time compatible pr
 2. Clone the repository containing data related to Princeton 3T scans
     * Navigate to the desired location (for example, this can be inside rtcloud-projects/mindeye): `cd /path/to/rtcloud-projects/mindeye`
     * `git clone https://huggingface.co/datasets/rishab-iyer1/3t`
-3. Create `config/config.json` with the appropriate file paths. `config/config_example.json` is provided for reference.
+3. Create `conf/config.json` with the appropriate file paths. `conf/config_example.json` is provided for reference.
     * `project_path` should be set to `<path/to/rtcloud-projects/mindeye>`
     * `storage_path` should be set to `<path/to/rt_all_data>`
     * `data_path` and `derivatives_path` should be set to `<path/to/3t/data>` and `<path/to/3t/derivatives>`, respectively
     * `fsl_path` should be set to the fsl/bin folder containing the executables of various FSL functions. This is often located in your home directory at `~/fsl/bin`
-    * The local copy that you update (`config/config.json`) will be automatically ignored by git (due to [.gitignore](.gitignore)). It is good practice to not track user-specific file paths with version control, since each user will have different file systems. 
+    * The local copy that you update (`conf/config.json`) will be automatically ignored by git (due to [.gitignore](.gitignore)). It is good practice to not track user-specific file paths with version control, since each user will have different file systems. 
 
 ## Get started!
 First, for an overview of the pipeline and description of stimuli, read [docs/00-pipeline.md](docs/00-pipeline.md). We provide three guides, described here. The first two are quickstart guides that focus on specific code snippets for you to run and are intended to simplify the setup process. The third document is a procedural guide that provides an overview of the different components that go into the real-time experiment.
