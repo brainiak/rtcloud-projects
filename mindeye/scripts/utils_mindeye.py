@@ -506,7 +506,7 @@ def create_design_matrix(images, starts, is_new_run, unique_images, n_runs, n_tr
 from generative_models.sgm.modules.encoders.modules import FrozenOpenCLIPImageEmbedder
 from scipy import stats
 from tqdm import tqdm
-def calculate_retrieval_metrics(all_clip_voxels, all_images):
+def calculate_retrieval_metrics(all_clip_voxels, all_images, mst_image_names=None, cache_dir=None):
     print("Loading clip_img_embedder")
     try:
         print(clip_img_embedder)
@@ -524,23 +524,36 @@ def calculate_retrieval_metrics(all_clip_voxels, all_images):
     all_fwd_acc = []
     all_bwd_acc = []
 
-    assert len(all_images) == len(all_clip_voxels)  
+    assert len(all_images) == len(all_clip_voxels)
     print("The total pool of images and clip voxels to do retrieval on is: ", len(all_images))
     all_percent_correct_fwds, all_percent_correct_bwds = [], []
 
     with torch.cuda.amp.autocast(dtype=torch.float16):
-        print("Creating embeddings for images")
-        with torch.no_grad():
-            all_emb = clip_img_embedder(all_images.to(torch.float16).to(device)).float() # CLIP-Image
+        if cache_dir:
+            os.makedirs(cache_dir, exist_ok=True)
+            cache_file = os.path.join(cache_dir, f"image_embeddings_{len(all_images)}.pt")
+            if os.path.exists(cache_file):
+                print(f"loading cached embeddings from {cache_file}")
+                all_emb = torch.load(cache_file).to(device)
+            else:
+                print("creating embeddings for images")
+                with torch.no_grad():
+                    all_emb = clip_img_embedder(all_images.to(torch.float16).to(device)).float()
+                torch.save(all_emb.cpu(), cache_file)
+                all_emb = all_emb.to(device)
+        else:
+            print("creating embeddings for images")
+            with torch.no_grad():
+                all_emb = clip_img_embedder(all_images.to(torch.float16).to(device)).float() # CLIP-Image
 
-        all_emb_ = all_clip_voxels # CLIP-Brain
+        all_emb_ = all_clip_voxels.detach().clone()
 
-        print("Calculating retrieval metrics")
+        print("calculating retrieval metrics")
         # flatten if necessary
         all_emb = all_emb.reshape(len(all_emb),-1).to(device)
-        all_emb_ = all_emb_.reshape(len(all_emb_),-1).to(device)
+        all_emb_ = all_emb_.reshape(len(all_emb_),-1).to(device).contiguous()
 
-        # l2norm 
+        # l2norm
         all_emb = nn.functional.normalize(all_emb,dim=-1)
         all_emb_ = nn.functional.normalize(all_emb_,dim=-1)
 
@@ -554,7 +567,7 @@ def calculate_retrieval_metrics(all_clip_voxels, all_images):
         # else:
         #     assert len(all_fwd_sim) == 50
         #     assert len(all_bwd_sim) == 50
-        
+
         all_percent_correct_fwds = topk(all_fwd_sim, all_labels, k=1).item()
         all_percent_correct_bwds = topk(all_bwd_sim, all_labels, k=1).item()
 
@@ -567,7 +580,86 @@ def calculate_retrieval_metrics(all_clip_voxels, all_images):
     print(f"overall fwd percent_correct: {all_fwd_acc[0]:.4f}")
     print(f"overall bwd percent_correct: {all_bwd_acc[0]:.4f}")
 
-    return all_fwd_acc[0], all_bwd_acc[0]
+    mst_2afc_score = None
+    if mst_image_names is not None:
+        import re
+        from collections import defaultdict
+
+        if len(mst_image_names) != len(set(mst_image_names)):
+            return
+
+        pair_groups = defaultdict(list)
+        for idx, name in enumerate(mst_image_names):
+            match1 = re.search(r'pair_(\d+)_(\d+)_\d+\.png', name)
+            match2 = re.search(r'pair_(\d+)_w_.*?[12]\.jpg', name)
+            if match1:
+                pair_id = f"{match1.group(1)}_{match1.group(2)}"
+            elif match2:
+                pair_id = f"w_{match2.group(1)}"
+            else:
+                continue
+            pair_groups[pair_id].append((name, idx))
+
+        pairs = []
+        pair_names = []
+        for pair_id, image_list in pair_groups.items():
+
+            seen_names = set()
+            unique_images = {}
+            for name, idx in image_list:
+                if name not in seen_names:
+                    unique_images[name] = idx
+                    seen_names.add(name)
+
+            if len(unique_images) == 2:
+                names = list(unique_images.keys())
+                idx1, idx2 = list(unique_images.values())
+                pairs.append([idx1, idx2])
+                pair_names.append((names[0], names[1]))
+
+        # check for incomplete pairs
+        incomplete_pairs = {k: v for k, v in pair_groups.items()
+                           if len({name for name, _ in v}) != 2}
+        if incomplete_pairs:
+            print(f"W{len(incomplete_pairs)} incomplete MST pairs")
+
+        if len(pairs) > 0:
+            correct = 0
+            debug_results = []
+            for pair_idx, (pair, (name1, name2)) in enumerate(zip(pairs, pair_names)):
+
+                idx1, idx2 = pair[0], pair[1]
+
+                brain_1 = all_emb_[idx1:idx1+1]
+                brain_2 = all_emb_[idx2:idx2+1]
+                image_1 = all_emb[idx1:idx1+1]
+                image_2 = all_emb[idx2:idx2+1]
+
+                sim_1_to_1 = nn.functional.cosine_similarity(brain_1, image_1)
+                sim_1_to_2 = nn.functional.cosine_similarity(brain_1, image_2)
+                sim_2_to_2 = nn.functional.cosine_similarity(brain_2, image_2)
+                sim_2_to_1 = nn.functional.cosine_similarity(brain_2, image_1)
+
+                correct_1 = sim_1_to_1 > sim_1_to_2
+                correct_2 = sim_2_to_2 > sim_2_to_1
+
+                # print comparison details
+                print(f"\npair {pair_idx + 1}:")
+                print(f"  image 1: {name1.split('/')[-1]}")
+                print(f"  image 2: {name2.split('/')[-1]}")
+                print(f"  img 1 brain embedding chose: {name1.split('/')[-1] if correct_1 else name2.split('/')[-1]} {'Correct' if correct_1 else 'Incorrect'}")
+                print(f"  img 2 brain embedding chose: {name2.split('/')[-1] if correct_2 else name1.split('/')[-1]} {'Correct' if correct_2 else 'Incorrect'}")
+
+                if correct_1:
+                    correct += 1
+                if correct_2:
+                    correct += 1
+
+            mst_2afc_score = correct / (2 * len(pairs))
+            print(f"\ncorrect choices: {correct}/{2*len(pairs)}")
+            print(f"mst 2afc score: {mst_2afc_score:.4f} ({mst_2afc_score*100:.2f}%)")
+
+    return all_fwd_acc[0], all_bwd_acc[0], mst_2afc_score
 
 
 from torchvision.models.feature_extraction import create_feature_extractor, get_graph_node_names
