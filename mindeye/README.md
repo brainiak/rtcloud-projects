@@ -114,3 +114,20 @@ If you are planning to run your own real-time MindEye scans, here are additional
 1. [mindeye_task](https://github.com/PrincetonCompMemLab/mindeye_task): contains all materials required to run NSD-like tasks with PsychoPy
 2. [mindeye_preproc](https://github.com/PrincetonCompMemLab/mindeye_preproc): contains materials used at Princeton for offline data preprocessing in preparation for the real-time session
 3. [mindeye_offline](https://github.com/PrincetonCompMemLab/mindeye_offline): contains materials to fine-tune MindEye on offline-preprocessed data in preparation for the real-time session
+
+### Reliability mask generation
+Before fine-tuning or real-time deployment, generate a subject-specific reliability mask for the training sessions. Use `scripts/reliability_mask.py` to aggregate GLMsingle betas, exclude held-out MST images, and leverage every available repeat when estimating voxel reliability. Outputs default to the location defined by `data_path` in your `config.json`.
+
+Example (`uv` environment activated):
+
+```bash
+uv run python mindeye/scripts/reliability_mask.py sub-005 ses-01 ses-02 --task C \
+    --quantile 0.85 --mask-img /path/to/3t/data/sub-005_final_mask.nii.gz
+```
+
+Key options:
+- `--beta-pattern` lets you match the GLMsingle betas naming scheme if it differs from the default `{subject}_{session}_task-{task}_betas.npy`.
+- `--threshold` or `--quantile` controls voxel selection per session before the union mask is formed.
+- `--test-pattern` can be specified multiple times when you need to exclude additional held-out image sets.
+
+The script writes per-session reliability arrays, per-session binary masks, and a union mask named `union_mask_from_ses-XX-YY.npy`. If you supply `--mask-img`, a 3D NIfTI version of the union mask is also produced for quality checks.
