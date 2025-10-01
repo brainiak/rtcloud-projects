@@ -22,3 +22,4 @@ package-lock.json
 # MacOS stuff
 .DS_Store
 .vscode
+/venv
