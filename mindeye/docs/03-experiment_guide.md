@@ -18,6 +18,7 @@ Refer to the [mindeye_task](https://github.com/PrincetonCompMemLab/mindeye_task)
 Refer to the [mindeye_preproc](https://github.com/PrincetonCompMemLab/mindeye_preproc/tree/main) repository for sample command-line snippets and scripts for preprocessing with fMRIPrep and GLMsingle on Princeton research clusters. This includes instructions on generating the subject-specific NSDgeneral mask and getting the betas to fine-tune MindEye.
 
 Refer to the [mindeye_offline](https://github.com/PrincetonCompMemLab/mindeye_offline) repository for instructions on making the union mask from multiple sessions and fine-tuning MindEye based on that mask.
+You can also generate the reliability and union masks directly within this repository using `scripts/reliability_mask.py`, which mirrors the conventions used by the real-time pipeline (excludes MST test images and averages across all repeats).
 
 ## Preparing for the real-time scan
 We strongly recommend running a real-time test scan using a dummy such as an MRI phantom. Based on the connection between the MRI machine and your analysis computer, you may need to identify where newly streamed DICOM volumes are being sent, how to access them, and any scanner-specific naming schemes for these volumes. 
