@@ -1,3 +1,4 @@
+import base64
 import numpy as np
 from torchvision import transforms
 import torch
@@ -9,6 +10,7 @@ import os
 import matplotlib.pyplot as plt
 import math
 import webdataset as wds
+import zlib
 
 import json
 from PIL import Image
@@ -16,6 +18,142 @@ import requests
 import time 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+class MindEyeModule(nn.Module):
+    class RidgeRegression(nn.Module):
+        def __init__(self, input_sizes, out_features, seq_len):
+            super().__init__()
+            self.out_features = out_features
+            self.linears = nn.ModuleList(
+                [nn.Linear(input_size, out_features) for input_size in input_sizes]
+            )
+            self.seq_len = seq_len
+
+        def forward(self, x, subj_idx):
+            return torch.cat([
+                self.linears[subj_idx](x[:, seq]).unsqueeze(1) for seq in range(self.seq_len)
+            ], dim=1)
+
+    class BrainNetwork(nn.Module):
+        def __init__(self, h=4096, in_dim=15724, out_dim=768, seq_len=2, n_blocks=4, drop=.15,
+                     clip_size=768):
+            super().__init__()
+            self.seq_len = seq_len
+            self.h = h
+            self.clip_size = clip_size
+
+            self.mixer_blocks1 = nn.ModuleList([
+                self.mixer_block1(h, drop) for _ in range(n_blocks)
+            ])
+            self.mixer_blocks2 = nn.ModuleList([
+                self.mixer_block2(seq_len, drop) for _ in range(n_blocks)
+            ])
+
+            self.backbone_linear = nn.Linear(h * seq_len, out_dim, bias=True)
+            self.clip_proj = self.projector(clip_size, clip_size, h=clip_size)
+
+        def projector(self, in_dim, out_dim, h=2048):
+            return nn.Sequential(
+                nn.LayerNorm(in_dim),
+                nn.GELU(),
+                nn.Linear(in_dim, h),
+                nn.LayerNorm(h),
+                nn.GELU(),
+                nn.Linear(h, h),
+                nn.LayerNorm(h),
+                nn.GELU(),
+                nn.Linear(h, out_dim)
+            )
+
+        def mlp(self, in_dim, out_dim, drop):
+            return nn.Sequential(
+                nn.Linear(in_dim, out_dim),
+                nn.GELU(),
+                nn.Dropout(drop),
+                nn.Linear(out_dim, out_dim),
+            )
+
+        def mixer_block1(self, h, drop):
+            return nn.Sequential(
+                nn.LayerNorm(h),
+                self.mlp(h, h, drop),
+            )
+
+        def mixer_block2(self, seq_len, drop):
+            return nn.Sequential(
+                nn.LayerNorm(seq_len),
+                self.mlp(seq_len, seq_len, drop)
+            )
+
+        def forward(self, x):
+            residual1 = x
+            residual2 = x.permute(0, 2, 1)
+            for block1, block2 in zip(self.mixer_blocks1, self.mixer_blocks2):
+                x = block1(x) + residual1
+                residual1 = x
+                x = x.permute(0, 2, 1)
+
+                x = block2(x) + residual2
+                residual2 = x
+                x = x.permute(0, 2, 1)
+
+            x = x.reshape(x.size(0), -1)
+            backbone = self.backbone_linear(x).reshape(len(x), -1, self.clip_size)
+            clip = self.clip_proj(backbone)
+
+            dummy = torch.Tensor([[0.], [0.]])
+            return backbone, clip, dummy
+
+    def __init__(self, num_voxels, hidden_dim, seq_len, clip_emb_dim, clip_seq_dim,
+                 n_blocks, drop=.15):
+        super().__init__()
+        self.ridge = MindEyeModule.RidgeRegression([
+            num_voxels
+        ], out_features=hidden_dim, seq_len=seq_len)
+        self.backbone = MindEyeModule.BrainNetwork(
+            h=hidden_dim,
+            in_dim=hidden_dim,
+            out_dim=clip_emb_dim * clip_seq_dim,
+            seq_len=seq_len,
+            n_blocks=n_blocks,
+            drop=drop,
+            clip_size=clip_emb_dim
+        )
+        self.diffusion_prior = None
+
+    def forward(self, x):
+        return x
+
+    def build_diffusion_prior(self, clip_emb_dim, clip_seq_dim, depth, dim_head, heads,
+                               timesteps, cond_drop_prob=0.2, image_embed_scale=None):
+        from models import BrainDiffusionPrior, PriorNetwork
+
+        prior_network = PriorNetwork(
+            dim=clip_emb_dim,
+            depth=depth,
+            dim_head=dim_head,
+            heads=heads,
+            causal=False,
+            num_tokens=clip_seq_dim,
+            learned_query_mode="pos_emb"
+        )
+
+        self.diffusion_prior = BrainDiffusionPrior(
+            net=prior_network,
+            image_embed_dim=clip_emb_dim,
+            condition_on_text_encodings=False,
+            timesteps=timesteps,
+            cond_drop_prob=cond_drop_prob,
+            image_embed_scale=image_embed_scale,
+        )
+        return self.diffusion_prior
+
+def compress_and_encode_image(image_array):
+    if image_array.dtype != np.uint8:
+        image_array = image_array.astype(np.uint8)
+    compressed_data = zlib.compress(image_array.tobytes())
+    encoded_data = base64.b64encode(compressed_data).decode('utf-8')
+    return encoded_data
 
 def is_interactive():
     import __main__ as main
@@ -250,6 +388,173 @@ def select_annotations(annots, random=True):
     txt = txt.flatten()
     return txt
 
+def do_reconstructions(model, betas_tt, diffusion_engine, vector_suffix, imsize, device,
+                       num_samples_per_image=1):
+    print('starting reconstruction!')
+    model.to(device)
+    model.eval().requires_grad_(False)
+    if model.diffusion_prior is None:
+        raise ValueError("MindEyeModule.diffusion_prior is not initialized. Call build_diffusion_prior first.")
+    clipvoxelsTR = None
+    reconsTR = None
+    with torch.no_grad(), torch.amp.autocast('cuda', dtype=torch.float16):
+        voxel = betas_tt.to(device)
+        voxel_ridge = model.ridge(voxel[:, [0]], 0)
+        backbone0, clip_voxels0, blurry_image_enc0 = model.backbone(voxel_ridge)
+        clip_voxels = clip_voxels0
+        backbone = backbone0
+        blurry_image_enc = blurry_image_enc0[0]
+        clipvoxelsTR = clip_voxels.cpu()
+        prior_out = model.diffusion_prior.p_sample_loop(
+            backbone.shape,
+            text_cond=dict(text_embed=backbone),
+            cond_scale=1.,
+            timesteps=20
+        )
+        for i in range(len(voxel)):
+            samples = unclip_recon(
+                prior_out[[i]],
+                diffusion_engine,
+                vector_suffix,
+                num_samples=num_samples_per_image
+            )
+            if reconsTR is None:
+                reconsTR = samples.cpu()
+            else:
+                reconsTR = torch.vstack((reconsTR, samples.cpu()))
+
+            reconsTR = transforms.Resize((imsize, imsize), antialias=True)(reconsTR)
+
+    return reconsTR, clipvoxelsTR
+
+def do_retrievals(clip_img_embedder, clipvoxel, all_images, imsize, device,
+                  total_retrievals=1):
+    values_dict = {}
+    with torch.amp.autocast('cuda', dtype=torch.float16):
+        emb = clip_img_embedder(
+            torch.reshape(all_images, (all_images.shape[0], 3, imsize, imsize)).to(device)
+        ).float()
+        emb = emb.cpu()
+        emb_ = clipvoxel
+        emb = emb.reshape(len(emb), -1)
+        emb_ = np.reshape(emb_, (1, 425984))
+        emb = nn.functional.normalize(emb, dim=-1)
+        emb_ = nn.functional.normalize(emb_, dim=-1)
+        emb_ = emb_.float()
+        fwd_sim = batchwise_cosine_similarity(emb_, emb)
+        print("Given Brain embedding, find correct Image embedding")
+
+    fwd_sim = np.array(fwd_sim.cpu())
+    which = np.flip(np.argsort(fwd_sim, axis=0))
+
+    for attempt in range(total_retrievals):
+        image_tensor = all_images[which[attempt].copy()]
+        if image_tensor.dim() == 4 and image_tensor.shape[0] == 1:
+            image_tensor = image_tensor.squeeze(0)
+        resized = transforms.Resize((imsize, imsize), antialias=True)(image_tensor.unsqueeze(0))
+        image_array = (resized.squeeze(0).permute(1, 2, 0).clamp(0, 1) * 255).byte().numpy()
+        values_dict[f"attempt{(attempt+1)}"] = compress_and_encode_image(image_array)
+
+    return values_dict
+
+
+def _to_flat_float(x):
+    """Flatten an array-like / torch.Tensor to a 1-D float32 CPU tensor."""
+    if isinstance(x, torch.Tensor):
+        return x.detach().to(torch.float32).reshape(-1).cpu()
+    return torch.as_tensor(np.asarray(x, dtype=np.float32)).reshape(-1)
+
+
+def cpd_from_embeddings(pred, correct, foil, normalize=True):
+    """Cortical Pairmate Distinctiveness from already-computed CLIP embeddings.
+
+    Defines the axis in CLIP space spanned by the ``correct`` image and its
+    pairmate ``foil``, then projects the brain-predicted embedding ``pred`` onto
+    that axis. Returns a signed, unbounded scalar:
+
+        +1  -> exactly at the correct image's embedding
+        -1  -> exactly at the foil's embedding
+         0  -> the midpoint between them
+
+    cpd = 2 * <pred - midpoint, correct - foil> / ||correct - foil||^2
+
+    All inputs are flattened. With ``normalize=True`` each flattened vector is
+    L2-normalized first, matching the normalized CLIP space that
+    :func:`do_retrievals` / :func:`calculate_retrieval_metrics` use.
+    """
+    pred = _to_flat_float(pred)
+    correct = _to_flat_float(correct)
+    foil = _to_flat_float(foil)
+    if normalize:
+        pred = F.normalize(pred, dim=-1)
+        correct = F.normalize(correct, dim=-1)
+        foil = F.normalize(foil, dim=-1)
+    axis = correct - foil
+    midpoint = (correct + foil) / 2.0
+    denom = torch.dot(axis, axis)
+    cpd = 2.0 * torch.dot(pred - midpoint, axis) / denom
+    return float(cpd)
+
+
+def compute_cpd(clip_img_embedder, clipvoxel, correct_image, foil_image,
+                imsize, device, normalize=True):
+    """Cortical Pairmate Distinctiveness for one trial.
+
+    Mirrors :func:`do_retrievals`: embeds the ``correct_image`` and its pairmate
+    ``foil_image`` through the CLIP image embedder, then projects the
+    brain-predicted CLIP embedding ``clipvoxel`` onto the correct-vs-foil axis
+    (see :func:`cpd_from_embeddings`).
+
+    correct_image / foil_image : image tensors, reshaped to (1, 3, imsize, imsize).
+    clipvoxel                  : brain-predicted CLIP embedding (any shape; flattened).
+    """
+    use_amp = str(device).startswith("cuda")
+
+    def _embed(img):
+        img = img.reshape(1, 3, imsize, imsize).to(device)
+        if use_amp:
+            with torch.amp.autocast('cuda', dtype=torch.float16):
+                emb = clip_img_embedder(img)
+        else:
+            emb = clip_img_embedder(img)
+        return emb.float().cpu()
+
+    with torch.no_grad():
+        correct_emb = _embed(correct_image)
+        foil_emb = _embed(foil_image)
+
+    return cpd_from_embeddings(clipvoxel, correct_emb, foil_emb, normalize=normalize)
+
+
+def benchmark_reconstruction(model, diffusion_engine, vector_suffix, device, imsize,
+                             iterations=5, warmup=2, batch_size=1):
+    from time import perf_counter
+
+    in_features = model.ridge.linears[0].in_features
+    seq_len = model.ridge.seq_len
+    betas = torch.randn(batch_size, seq_len, in_features)
+
+    # Warm-up
+    for _ in range(max(warmup, 0)):
+        do_reconstructions(model, betas.clone(), diffusion_engine, vector_suffix, imsize, device)
+
+    timings = []
+    for _ in range(iterations):
+        if device.type == 'cuda':
+            torch.cuda.synchronize(device)
+        start = perf_counter()
+        do_reconstructions(model, betas.clone(), diffusion_engine, vector_suffix, imsize, device)
+        if device.type == 'cuda':
+            torch.cuda.synchronize(device)
+        timings.append(perf_counter() - start)
+
+    return {
+        "mean": float(np.mean(timings)),
+        "std": float(np.std(timings)),
+        "iterations": iterations,
+        "warmup": warmup,
+    }
+
 from generative_models.sgm.util import append_dims
 def unclip_recon(x, diffusion_engine, vector_suffix,
                  num_samples=1, offset_noise_level=0.04):
@@ -381,7 +686,7 @@ def load_design_files(sub, session, func_task_name, designdir, design_ses_list=N
     elif (sub=='sub-001' and session in ('ses-02', 'ses-03', 'ses-04', 'ses-05')) or \
          (sub=='sub-002' and session in ('ses-02')) or sub=='sub-003' or \
          (sub=='sub-004' and session in ('ses-01', 'ses-02')) or \
-         (sub=='sub-005' and session in ('ses-01', 'ses-02', 'ses-03', 'ses-06')) or \
+         (sub=='sub-005' and session in ('ses-01', 'ses-02', 'ses-03', 'ses-06', 'ses-07')) or \
          (sub=='sub-006' and session in ('ses-01')):
         
         if (sub=='sub-001' and session in ('ses-05')):
@@ -411,7 +716,7 @@ def load_design_files(sub, session, func_task_name, designdir, design_ses_list=N
             assert func_task_name == 'C'
             filename = f"{designdir}/csv/{sub}_ses-08.csv"
 
-        elif (sub=='sub-005' and session in ('ses-01', 'ses-02', 'ses-03', 'ses-06')) or sub=='sub-006' and session in ('ses-01'):
+        elif (sub=='sub-005' and session in ('ses-01', 'ses-02', 'ses-03', 'ses-06', 'ses-07')) or sub=='sub-006' and session in ('ses-01'):
             filename = f"{designdir}/csv/{sub}_{session}.csv"
         
         data, starts, images, is_new_run, image_names = process_design(filename)

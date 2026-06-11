@@ -189,7 +189,8 @@ class TestCausalVolumeIndices:
         assert idx[-1] == 39
 
     def test_capped_at_n_vols(self):
-        idx = causal_volume_indices(300.0, 21.0, tr_length=1.5, n_vols=239, hrf_tail=8.0)
+        # cutoff far past the end of the run -> clamp to the last available volume
+        idx = causal_volume_indices(1000.0, 21.0, tr_length=1.5, n_vols=239, hrf_tail=8.0)
         assert idx[-1] == 238
         assert len(idx) == 239
 
@@ -257,7 +258,7 @@ class TestBuildLssEvents:
     def test_references_keep_true_duration(self):
         out = build_lss_events(self._events(), probe_trial_number=1, probe_duration=3.0)
         ref = out[out["trial_type"] == "reference"]
-        assert all(ref["duration"] == pytest.approx(21.0))
+        assert ref["duration"].tolist() == pytest.approx([21.0] * len(ref))
 
     def test_required_columns_present(self):
         out = build_lss_events(self._events(), probe_trial_number=2, probe_duration=7.0)
