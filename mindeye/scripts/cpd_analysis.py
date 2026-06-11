@@ -542,9 +542,10 @@ def plot_results(out_dir, results, durations, strategies):
         fig.savefig(os.path.join(out_dir, "cpd_vs_duration.png"), dpi=150)
         plt.close(fig)
 
-        # per-trial heatmap (trials x durations)
+        # per-trial heatmap (trials x durations); data-driven symmetric scale
+        absmax = max(float(np.nanpercentile(np.abs(cpd), 98)), 1e-6)
         fig, ax = plt.subplots(figsize=(8, 9))
-        im = ax.imshow(cpd.T, aspect="auto", cmap="RdBu_r", vmin=-2, vmax=2,
+        im = ax.imshow(cpd.T, aspect="auto", cmap="RdBu_r", vmin=-absmax, vmax=absmax,
                        extent=[durations[0], durations[-1], cpd.shape[1], 0])
         ax.set_xlabel("modeled stimulus length (s)")
         ax.set_ylabel("trial (image presentation)")
@@ -573,6 +574,26 @@ def plot_results(out_dir, results, durations, strategies):
         plt.close(fig)
 
 
+def load_cached_results(out_dir, strategies):
+    """Rebuild the `results` dict from cached .npy/.json (for --replot)."""
+    results, durations = {}, []
+    if "glm" in strategies:
+        durations = np.load(os.path.join(out_dir, "glm_durations.npy")).tolist()
+        cpd = np.load(os.path.join(out_dir, "glm_cpd_per_trial.npy"))      # (n_dur, n_trials)
+        twoafc = np.load(os.path.join(out_dir, "glm_2afc.npy"))
+        ret = np.load(os.path.join(out_dir, "glm_retrieval.npy"))
+        results["glm"] = {L: {"cpd": cpd[i], "twoafc": float(twoafc[i]),
+                              "retrieval": float(ret[i])}
+                          for i, L in enumerate(durations)}
+    if "avgbold" in strategies:
+        with open(os.path.join(out_dir, "avgbold_summary.json")) as f:
+            summ = json.load(f)
+        results["avgbold"] = {
+            "cpd": np.load(os.path.join(out_dir, "avgbold_cpd_per_trial.npy")),
+            "twoafc": summ["twoafc"], "retrieval": summ["retrieval"]}
+    return results, durations
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--runs", default="all",
@@ -581,6 +602,8 @@ def main():
                     help="comma-separated durations (1-21) or 'all'")
     ap.add_argument("--strategies", default="glm,avgbold")
     ap.add_argument("--out", default=None, help="output dir (default derivatives/cpd_ses-07)")
+    ap.add_argument("--replot", action="store_true",
+                    help="regenerate plots from cached .npy without recomputing betas")
     args = ap.parse_args()
 
     cfg = load_config()
@@ -590,6 +613,12 @@ def main():
         [int(x) for x in args.durations.split(",")]
     strategies = [s.strip() for s in args.strategies.split(",")]
     out_dir = args.out or os.path.join(cfg["derivatives_path"], "cpd_ses-07")
+
+    if args.replot:
+        results, durations = load_cached_results(out_dir, strategies)
+        plot_results(out_dir, results, durations, strategies)
+        print(f"replotted -> {out_dir}")
+        return
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"device={device} runs={runs} durations={durations} strategies={strategies}")
