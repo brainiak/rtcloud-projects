@@ -14,6 +14,11 @@ from cpd_analysis import (
     causal_volume_indices,
     avg_bold_volume_indices,
     build_lss_events,
+    zscore_betas,
+    per_trial_cpd,
+    pairmate_2afc,
+    pairmate_2afc_accuracy,
+    forward_retrieval_accuracy,
 )
 
 
@@ -266,3 +271,71 @@ class TestBuildLssEvents:
             assert col in out.columns
         # full session up to probe -> 3 trials
         assert len(out) == 3
+
+
+# --------------------------------------------------------------------------
+# Aggregation helpers (mocked predict / embeddings; no GPU/data)
+# --------------------------------------------------------------------------
+class TestZscoreBetas:
+    def test_zero_mean_unit_std_per_voxel(self):
+        b = np.array([[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]])
+        z = zscore_betas(b)
+        assert z.mean(axis=0) == pytest.approx([0.0, 0.0], abs=1e-9)
+        assert z.std(axis=0) == pytest.approx([1.0, 1.0], abs=1e-3)
+
+
+class TestPerTrialCpd:
+    def test_predict_correct_gives_plus_one(self):
+        n_vox = 4
+        betas = np.random.RandomState(0).randn(3, n_vox)
+        correct = [torch.tensor([1.0, 0.0]), torch.tensor([0.0, 1.0]), torch.tensor([1.0, 1.0])]
+        foil = [torch.tensor([0.0, 1.0]), torch.tensor([1.0, 0.0]), torch.tensor([-1.0, 1.0])]
+        # predict_fn returns each trial's correct embedding -> CPD == +1
+        state = {"t": 0}
+
+        def predict_fn(_betas_tt):
+            emb = correct[state["t"]]
+            state["t"] += 1
+            return emb
+
+        cpd = per_trial_cpd(betas, correct, foil, predict_fn, num_voxels=n_vox)
+        assert cpd == pytest.approx([1.0, 1.0, 1.0])
+
+    def test_betas_tt_shape_passed_to_predict(self):
+        n_vox = 5
+        betas = np.zeros((2, n_vox))
+        seen = []
+
+        def predict_fn(betas_tt):
+            seen.append(tuple(betas_tt.shape))
+            return torch.tensor([1.0, 0.0])
+
+        per_trial_cpd(betas, [torch.tensor([1.0, 0.0])] * 2,
+                      [torch.tensor([0.0, 1.0])] * 2, predict_fn, num_voxels=n_vox)
+        assert seen == [(1, 1, n_vox), (1, 1, n_vox)]
+
+
+class TestRetrievalMetrics:
+    def test_2afc_correct_closer(self):
+        pred = torch.tensor([1.0, 0.0])
+        correct = torch.tensor([1.0, 0.0])
+        foil = torch.tensor([0.0, 1.0])
+        assert pairmate_2afc(pred, correct, foil) == 1.0
+        assert pairmate_2afc(foil, correct, foil) == 0.0
+
+    def test_2afc_accuracy_mean(self):
+        preds = [torch.tensor([1.0, 0.0]), torch.tensor([0.0, 1.0])]
+        correct = [torch.tensor([1.0, 0.0]), torch.tensor([1.0, 0.0])]
+        foil = [torch.tensor([0.0, 1.0]), torch.tensor([0.0, 1.0])]
+        # trial 0 correct closer (1.0), trial 1 foil closer (0.0) -> 0.5
+        assert pairmate_2afc_accuracy(preds, correct, foil) == pytest.approx(0.5)
+
+    def test_forward_retrieval_perfect(self):
+        pool = [torch.tensor([1.0, 0.0]), torch.tensor([0.0, 1.0])]
+        preds = [torch.tensor([0.9, 0.1]), torch.tensor([0.1, 0.9])]
+        assert forward_retrieval_accuracy(preds, [0, 1], pool) == pytest.approx(1.0)
+
+    def test_forward_retrieval_wrong(self):
+        pool = [torch.tensor([1.0, 0.0]), torch.tensor([0.0, 1.0])]
+        preds = [torch.tensor([0.1, 0.9])]  # closest to pool[1], but correct is 0
+        assert forward_retrieval_accuracy(preds, [0], pool) == pytest.approx(0.0)
