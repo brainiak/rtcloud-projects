@@ -15,6 +15,7 @@ from cpd_analysis import (
     avg_bold_volume_indices,
     build_lss_events,
     zscore_betas,
+    causal_zscore_betas,
     per_trial_cpd,
     pairmate_2afc,
     pairmate_2afc_accuracy,
@@ -282,6 +283,31 @@ class TestZscoreBetas:
         z = zscore_betas(b)
         assert z.mean(axis=0) == pytest.approx([0.0, 0.0], abs=1e-9)
         assert z.std(axis=0) == pytest.approx([1.0, 1.0], abs=1e-3)
+
+
+class TestCausalZscoreBetas:
+    def test_row0_is_zero(self):
+        # first trial has only itself -> std=0 -> z=0 (degenerate, by design)
+        b = np.array([[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]])
+        z = causal_zscore_betas(b)
+        assert z[0] == pytest.approx([0.0, 0.0], abs=1e-9)
+
+    def test_each_row_uses_only_prefix_stats(self):
+        b = np.array([[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]])
+        z = causal_zscore_betas(b)
+        # t=1: mean=[1.5,15] std=[0.5,5] -> ~[1,1]
+        assert z[1] == pytest.approx([1.0, 1.0], abs=1e-3)
+        # t=2: mean=[2,20] std=sqrt(2/3)*[1,10] -> [1.2247,1.2247]
+        assert z[2] == pytest.approx([1.22474, 1.22474], abs=1e-3)
+
+    def test_last_row_matches_global_but_earlier_rows_differ(self):
+        b = np.array([[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]])
+        g = zscore_betas(b)
+        c = causal_zscore_betas(b)
+        # final row sees the whole prefix == full session -> identical to global
+        assert c[-1] == pytest.approx(g[-1], abs=1e-6)
+        # but the first row differs (global uses future trials, causal does not)
+        assert not np.allclose(c[0], g[0])
 
 
 class TestPerTrialCpd:

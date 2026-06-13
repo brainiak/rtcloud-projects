@@ -161,11 +161,32 @@ def build_lss_events(events_df, probe_trial_number, probe_duration):
 
 
 def zscore_betas(betas):
-    """Z-score a (n_trials, n_voxels) beta matrix per voxel, across trials."""
+    """Z-score a (n_trials, n_voxels) beta matrix per voxel, across ALL trials.
+
+    Non-causal (uses the whole session's statistics). Kept for reference/tests;
+    the analysis uses ``causal_zscore_betas`` instead.
+    """
     betas = np.asarray(betas, dtype=np.float64)
     mean = betas.mean(axis=0, keepdims=True)
     std = betas.std(axis=0, keepdims=True)
     return (betas - mean) / (std + 1e-6)
+
+
+def causal_zscore_betas(betas):
+    """Causally z-score a (n_trials, n_voxels) beta matrix per voxel.
+
+    Trials are assumed to be in temporal order. Row ``t`` is z-scored using the
+    per-voxel mean/std computed over trials ``0..t`` *inclusive* only -- the data
+    available up to and including that trial -- matching the real-time pipeline's
+    running z-score (``mindeye.py`` z_mean/z_std over betas collected so far).
+    Row 0 therefore comes out all-zeros (single-sample std == 0).
+    """
+    betas = np.asarray(betas, dtype=np.float64)
+    out = np.empty_like(betas)
+    for t in range(betas.shape[0]):
+        prefix = betas[: t + 1]
+        out[t] = (betas[t] - prefix.mean(axis=0)) / (prefix.std(axis=0) + 1e-6)
+    return out
 
 
 # ==========================================================================
@@ -181,7 +202,7 @@ def per_trial_cpd(betas, correct_embeds, foil_embeds, predict_fn,
     predict_fn     : callable betas_tt[(1,1,num_voxels)] -> predicted CLIP embedding.
     Returns np.ndarray (n_trials,) of CPD values.
     """
-    z = zscore_betas(betas)
+    z = causal_zscore_betas(betas)
     cpds = []
     for t in range(len(z)):
         betas_tt = torch.from_numpy(np.asarray(z[t], dtype=np.float32)).reshape(
@@ -314,7 +335,11 @@ def load_image_tensor(cfg, image_name, imsize=IMSIZE):
     from torchvision import transforms
     im = imageio.imread(os.path.join(cfg["data_path"], image_name))
     im = torch.tensor(im / 255.0).permute(2, 0, 1).float()
-    im = transforms.Resize((imsize, imsize), antialias=True)(im.unsqueeze(0))
+    # antialias=False to match the canonical stimulus preprocessing the decoder was
+    # trained/evaluated with (mindeye.py:281 `transforms.Resize((imsize, imsize))`,
+    # which defaults to antialias=False for tensors). Using antialias=True here shifts
+    # embeddings at the sub-pixel level and flips ~3/72 near-tie pairmate 2-AFC trials.
+    im = transforms.Resize((imsize, imsize), antialias=False)(im.unsqueeze(0))
     return im.squeeze(0)
 
 
@@ -455,7 +480,7 @@ def analyze(cfg, betas, trial_image_names, clip_img_embedder, predict_fn, device
         results["glm"] = {}
         for L in durations:
             b = betas["glm"][L]
-            z = zscore_betas(b)
+            z = causal_zscore_betas(b)
             preds = [predict_fn(torch.from_numpy(np.asarray(z[t], dtype=np.float32))
                                 .reshape(1, 1, NUM_VOXELS)) for t in range(len(z))]
             cpd = np.asarray([cpd_from_embeddings(correct=correct_embeds[t],
@@ -472,7 +497,7 @@ def analyze(cfg, betas, trial_image_names, clip_img_embedder, predict_fn, device
 
     if "avgbold" in strategies:
         b = betas["avgbold"]
-        z = zscore_betas(b)
+        z = causal_zscore_betas(b)
         preds = [predict_fn(torch.from_numpy(np.asarray(z[t], dtype=np.float32))
                             .reshape(1, 1, NUM_VOXELS)) for t in range(len(z))]
         cpd = np.asarray([cpd_from_embeddings(correct=correct_embeds[t],
@@ -594,6 +619,23 @@ def load_cached_results(out_dir, strategies):
     return results, durations
 
 
+def load_cached_betas(out_dir, durations, strategies):
+    """Reload betas + trial image names saved by a previous full run.
+
+    Lets us re-run the downstream (z-score -> predict -> CPD/2-AFC) without
+    refitting any GLMs -- e.g. after changing the z-scoring scheme.
+    """
+    betas = {}
+    if "glm" in strategies:
+        betas["glm"] = {L: np.load(os.path.join(out_dir, f"glm_betas_L{L:02d}.npy"))
+                        for L in durations}
+    if "avgbold" in strategies:
+        betas["avgbold"] = np.load(os.path.join(out_dir, "avgbold_betas.npy"))
+    trial_image_names = pd.read_csv(
+        os.path.join(out_dir, "trial_images.csv"))["image_name"].tolist()
+    return betas, trial_image_names
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--runs", default="all",
@@ -604,6 +646,9 @@ def main():
     ap.add_argument("--out", default=None, help="output dir (default derivatives/cpd_ses-07)")
     ap.add_argument("--replot", action="store_true",
                     help="regenerate plots from cached .npy without recomputing betas")
+    ap.add_argument("--reanalyze", action="store_true",
+                    help="reload cached betas and re-run CPD/2-AFC + save + plot "
+                         "(no GLM refit); use after changing z-scoring/analysis")
     args = ap.parse_args()
 
     cfg = load_config()
@@ -621,6 +666,21 @@ def main():
         return
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    if args.reanalyze:
+        print(f"reanalyze (causal z-score) device={device} durations={durations} "
+              f"strategies={strategies}")
+        betas, trial_image_names = load_cached_betas(out_dir, durations, strategies)
+        model = build_model(cfg, device)
+        clip_img_embedder = load_clip_embedder(cfg, device)
+        predict_fn = make_predict_fn(model, device)
+        results = analyze(cfg, betas, trial_image_names, clip_img_embedder,
+                          predict_fn, device, durations, strategies)
+        save_results(out_dir, betas, results, durations, strategies)
+        plot_results(out_dir, results, durations, strategies)
+        print(f"reanalyzed -> {out_dir}")
+        return
+
     print(f"device={device} runs={runs} durations={durations} strategies={strategies}")
 
     import nibabel as nib
