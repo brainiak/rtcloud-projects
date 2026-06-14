@@ -14,12 +14,18 @@ from cpd_analysis import (
     causal_volume_indices,
     avg_bold_volume_indices,
     build_lss_events,
+    sliding_window_onsets,
     zscore_betas,
     causal_zscore_betas,
     per_trial_cpd,
     pairmate_2afc,
     pairmate_2afc_accuracy,
     forward_retrieval_accuracy,
+)
+from cpd_reliability import (
+    pair_repeats,
+    repeat_reliability,
+    cross_approach_correlation,
 )
 
 
@@ -273,6 +279,78 @@ class TestBuildLssEvents:
         # full session up to probe -> 3 trials
         assert len(out) == 3
 
+    def test_default_reference_mode_is_true(self):
+        # the existing call signature (no reference_mode) keeps references at 21s
+        out = build_lss_events(self._events(), probe_trial_number=2, probe_duration=7.0)
+        ref = out[out["trial_type"] == "reference"]
+        assert ref["duration"].tolist() == pytest.approx([21.0] * len(ref))
+
+
+class TestBuildLssEventsMatched:
+    def _events(self):
+        return pd.DataFrame(
+            {
+                "onset": [100.0, 130.0, 160.0],
+                "duration": [21.0, 21.0, 21.0],
+                "trial_number": [0, 1, 2],
+                "image_name": ["a.png", "b.png", "c.png"],
+            }
+        )
+
+    def test_references_use_matched_duration(self):
+        out = build_lss_events(self._events(), probe_trial_number=2, probe_duration=5.0,
+                               reference_mode="matched")
+        # every row (probe + references) modeled at the matched length L
+        assert out["duration"].tolist() == pytest.approx([5.0, 5.0, 5.0])
+
+    def test_probe_still_labelled_and_matched(self):
+        out = build_lss_events(self._events(), probe_trial_number=1, probe_duration=9.0,
+                               reference_mode="matched")
+        probe = out[out["trial_type"] == "probe"]
+        ref = out[out["trial_type"] == "reference"]
+        assert probe["duration"].iloc[0] == pytest.approx(9.0)
+        assert ref["duration"].tolist() == pytest.approx([9.0] * len(ref))
+
+    def test_causal_and_rezeroed_unchanged(self):
+        # matched mode only touches reference durations; causality + onsets unchanged
+        out = build_lss_events(self._events(), probe_trial_number=1, probe_duration=9.0,
+                               reference_mode="matched")
+        assert len(out) == 2  # trial 2 (future) dropped
+        assert out["onset"].min() == pytest.approx(0.0)
+
+    def test_invalid_mode_raises(self):
+        with pytest.raises(ValueError):
+            build_lss_events(self._events(), probe_trial_number=1, probe_duration=3.0,
+                             reference_mode="bogus")
+
+
+# --------------------------------------------------------------------------
+# sliding_window_onsets
+# --------------------------------------------------------------------------
+class TestSlidingWindowOnsets:
+    def test_offsets_from_zero(self):
+        # box=3, step=1.5, stim_dur=21 -> starts 0,1.5,...,18 (start+box<=21)
+        on = sliding_window_onsets(0.0, stim_dur=21.0, box=3.0, step=1.5)
+        assert on[0] == pytest.approx(0.0)
+        assert on[-1] == pytest.approx(18.0)
+        assert len(on) == 13
+
+    def test_absolute_onset_shift(self):
+        on = sliding_window_onsets(30.0, stim_dur=21.0, box=3.0, step=1.5)
+        assert on[0] == pytest.approx(30.0)
+        assert on[-1] == pytest.approx(48.0)
+
+    def test_box_stays_within_stim_window(self):
+        on = sliding_window_onsets(0.0, stim_dur=10.0, box=3.0, step=1.5)
+        # last box must end by stim_dur: start <= 7 -> 0,1.5,3,4.5,6 (7.5>7 excluded)
+        assert max(on) + 3.0 <= 10.0 + 1e-9
+        assert on == pytest.approx([0.0, 1.5, 3.0, 4.5, 6.0])
+
+    def test_contiguous_step(self):
+        on = sliding_window_onsets(0.0, stim_dur=21.0, box=3.0, step=1.5)
+        diffs = np.diff(on)
+        assert np.allclose(diffs, 1.5)
+
 
 # --------------------------------------------------------------------------
 # Aggregation helpers (mocked predict / embeddings; no GPU/data)
@@ -365,3 +443,75 @@ class TestRetrievalMetrics:
         pool = [torch.tensor([1.0, 0.0]), torch.tensor([0.0, 1.0])]
         preds = [torch.tensor([0.1, 0.9])]  # closest to pool[1], but correct is 0
         assert forward_retrieval_accuracy(preds, [0], pool) == pytest.approx(0.0)
+
+
+# --------------------------------------------------------------------------
+# pair_repeats  (map the 36 images x 2 repeats to index pairs)
+# --------------------------------------------------------------------------
+class TestPairRepeats:
+    def test_basic_pairs(self):
+        names = ["a", "b", "a", "b"]
+        pairs = pair_repeats(names)
+        assert sorted(pairs) == [(0, 2), (1, 3)]
+
+    def test_order_independent_grouping(self):
+        names = ["a", "b", "c", "b", "c", "a"]
+        pairs = dict(pair_repeats(names))  # first-index -> second-index
+        # a at 0,5 ; b at 1,3 ; c at 2,4
+        assert pairs == {0: 5, 1: 3, 2: 4}
+
+    def test_non_two_count_raises(self):
+        with pytest.raises(ValueError):
+            pair_repeats(["a", "b", "a"])  # 'b' appears once
+        with pytest.raises(ValueError):
+            pair_repeats(["a", "a", "a", "a"])  # 'a' appears four times
+
+
+# --------------------------------------------------------------------------
+# repeat_reliability  (mean across-repeat Pearson over the voxel axis)
+# --------------------------------------------------------------------------
+class TestRepeatReliability:
+    def test_known_mean_correlation(self):
+        # image a: identical repeats -> r=+1 ; image b: reversed -> r=-1 ; mean 0
+        betas = np.array([
+            [1.0, 2.0, 3.0, 4.0],   # a, repeat 1
+            [1.0, 2.0, 3.0, 4.0],   # b, repeat 1
+            [1.0, 2.0, 3.0, 4.0],   # a, repeat 2
+            [4.0, 3.0, 2.0, 1.0],   # b, repeat 2
+        ])
+        names = ["a", "b", "a", "b"]
+        assert repeat_reliability(betas, names) == pytest.approx(0.0, abs=1e-9)
+
+    def test_perfect_reliability(self):
+        betas = np.array([
+            [1.0, 2.0, 3.0, 4.0],
+            [9.0, 1.0, 5.0, 2.0],
+            [1.0, 2.0, 3.0, 4.0],
+            [9.0, 1.0, 5.0, 2.0],
+        ])
+        names = ["a", "b", "a", "b"]
+        assert repeat_reliability(betas, names) == pytest.approx(1.0, abs=1e-9)
+
+    def test_correlates_over_voxel_axis_only(self):
+        # adding a constant offset per repeat must not change Pearson (mean-invariant)
+        betas = np.array([
+            [1.0, 2.0, 3.0, 4.0],
+            [101.0, 102.0, 103.0, 104.0],  # same shape, shifted by 100
+        ])
+        names = ["a", "a"]
+        assert repeat_reliability(betas, names) == pytest.approx(1.0, abs=1e-9)
+
+
+# --------------------------------------------------------------------------
+# cross_approach_correlation  (per-trial Pearson over voxels, mean over trials)
+# --------------------------------------------------------------------------
+class TestCrossApproachCorrelation:
+    def test_identity_is_one(self):
+        a = np.random.RandomState(1).randn(5, 8)
+        assert cross_approach_correlation(a, a) == pytest.approx(1.0, abs=1e-9)
+
+    def test_known_mean(self):
+        a = np.array([[1.0, 2.0, 3.0, 4.0], [1.0, 2.0, 3.0, 4.0]])
+        b = np.array([[1.0, 2.0, 3.0, 4.0], [4.0, 3.0, 2.0, 1.0]])
+        # trial 0 r=+1, trial 1 r=-1 -> mean 0
+        assert cross_approach_correlation(a, b) == pytest.approx(0.0, abs=1e-9)
