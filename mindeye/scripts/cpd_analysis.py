@@ -137,16 +137,26 @@ def avg_bold_volume_indices(onset, tr_length=TR_LENGTH, n_vols=N_VOLS_PER_RUN,
     return idx
 
 
-def build_lss_events(events_df, probe_trial_number, probe_duration):
+def build_lss_events(events_df, probe_trial_number, probe_duration,
+                     reference_mode="true"):
     """Build an LSS events table for one probe trial.
 
     Onsets are re-zeroed to the run's first onset. Only trials up to and
     including the probe are kept (causal). The probe trial is labelled
     ``"probe"`` with duration ``probe_duration``; all other (reference) trials
-    keep their true duration and are labelled ``"reference"``.
+    are labelled ``"reference"``.
+
+    ``reference_mode`` controls the reference trials' modeled duration:
+      - ``"true"`` (default): references keep their true (21 s) duration -- an
+        *asymmetric* model (probe = L, others = 21 s).
+      - ``"matched"``: references are also modeled at ``probe_duration`` -- a
+        *symmetric/matched-length* model (probe = L, others = L).
 
     Returns a DataFrame with columns ['onset', 'duration', 'trial_type'].
     """
+    if reference_mode not in ("true", "matched"):
+        raise ValueError(
+            f"reference_mode must be 'true' or 'matched', got {reference_mode!r}")
     df = events_df.copy()
     df["onset"] = df["onset"].astype(float)
     df["duration"] = df["duration"].astype(float)
@@ -157,7 +167,26 @@ def build_lss_events(events_df, probe_trial_number, probe_duration):
         df["trial_number"] == probe_trial_number, "probe", "reference"
     )
     df.loc[df["trial_type"] == "probe", "duration"] = float(probe_duration)
+    if reference_mode == "matched":
+        df.loc[df["trial_type"] == "reference", "duration"] = float(probe_duration)
     return df[["onset", "duration", "trial_type"]].reset_index(drop=True)
+
+
+def sliding_window_onsets(trial_onset, stim_dur=TRUE_STIM_DURATION, box=3.0,
+                          step=TR_LENGTH):
+    """Absolute onsets of a ``box``-second window stepped by ``step`` across a trial.
+
+    The window starts at ``trial_onset`` and advances in ``step`` increments while
+    the whole box stays inside the [trial_onset, trial_onset+stim_dur] stimulus
+    period (``offset + box <= stim_dur``). With the defaults (stim_dur=21, box=3,
+    step=1.5) this yields 13 windows at offsets 0, 1.5, ..., 18 s.
+    """
+    onsets = []
+    offset = 0.0
+    while offset + box <= stim_dur + 1e-9:
+        onsets.append(trial_onset + offset)
+        offset += step
+    return onsets
 
 
 def zscore_betas(betas):
@@ -381,27 +410,79 @@ def make_predict_fn(model, device):
 # ==========================================================================
 # Beta estimation (one beta vector per trial, in the 2792-voxel union space)
 # ==========================================================================
-def glm_beta_for_trial(vols4d, events_df, union_mask_img, probe_trial_number,
-                       probe_duration, boldref_nib):
-    """Causal/cumulative LSS beta for one probe trial at a given modeled duration."""
+def _make_first_level_model(union_mask_img):
+    """The single canonical FirstLevelModel config shared by every GLM strategy."""
     from nilearn.glm.first_level import FirstLevelModel
-    from nilearn.image import new_img_like
-
-    first_onset = float(events_df["onset"].astype(float).iloc[0])
-    probe_onset = float(events_df["onset"].astype(float).iloc[probe_trial_number]) - first_onset
-    vol_idx = causal_volume_indices(probe_onset, probe_duration)
-    img = new_img_like(boldref_nib, vols4d[..., : vol_idx[-1] + 1], copy_header=True)
-
-    events = build_lss_events(events_df, probe_trial_number, probe_duration)
-    glm = FirstLevelModel(
+    return FirstLevelModel(
         t_r=TR_LENGTH, slice_time_ref=0, hrf_model="glover", drift_model="cosine",
         drift_order=1, high_pass=0.01, mask_img=union_mask_img, signal_scaling=False,
         smoothing_fwhm=None, noise_model="ar1", n_jobs=1, verbose=0,
         memory_level=1, minimize_memory=True,
     )
+
+
+def _fit_probe_beta(vols4d, union_mask_img, boldref_nib, events, last_vol):
+    """Fit the canonical GLM on volumes 0..last_vol and return the masked 'probe' beta."""
+    from nilearn.image import new_img_like
+    img = new_img_like(boldref_nib, vols4d[..., : last_vol + 1], copy_header=True)
+    glm = _make_first_level_model(union_mask_img)
     glm.fit(run_imgs=img, events=events)
     beta = glm.compute_contrast("probe", output_type="effect_size").get_fdata()
     return _fast_apply_mask(beta, union_mask_img.get_fdata())
+
+
+def glm_beta_for_trial(vols4d, events_df, union_mask_img, probe_trial_number,
+                       probe_duration, boldref_nib, reference_mode="true"):
+    """Causal/cumulative LSS beta for one probe trial at a given modeled duration.
+
+    ``reference_mode`` is forwarded to :func:`build_lss_events`: ``"true"`` keeps
+    prior reference trials at 21 s (asymmetric); ``"matched"`` models them at the
+    same length L as the probe (symmetric/matched-length).
+    """
+    first_onset = float(events_df["onset"].astype(float).iloc[0])
+    probe_onset = float(events_df["onset"].astype(float).iloc[probe_trial_number]) - first_onset
+    vol_idx = causal_volume_indices(probe_onset, probe_duration)
+    events = build_lss_events(events_df, probe_trial_number, probe_duration,
+                              reference_mode=reference_mode)
+    return _fit_probe_beta(vols4d, union_mask_img, boldref_nib, events, vol_idx[-1])
+
+
+def glm_matched_beta_for_trial(vols4d, events_df, union_mask_img, probe_trial_number,
+                               probe_duration, boldref_nib):
+    """Matched-length variant: probe = L AND prior references = L (symmetric)."""
+    return glm_beta_for_trial(vols4d, events_df, union_mask_img, probe_trial_number,
+                              probe_duration, boldref_nib, reference_mode="matched")
+
+
+def sliding_beta_for_trial(vols4d, events_df, union_mask_img, probe_trial_number,
+                           boldref_nib, box=3.0):
+    """Per-window betas for one trial: a ``box``-second probe stepped 1 TR at a time.
+
+    For each window position (``sliding_window_onsets``) a causal GLM is fit with
+    the probe = a ``box``-second boxcar at that position, and all *strictly prior*
+    trials kept as 21 s references. Volumes are truncated to
+    ``window_onset + box + hrf_tail``. Returns (n_windows, NUM_VOXELS)."""
+    onset_col = events_df["onset"].astype(float)
+    first_onset = float(onset_col.iloc[0])
+    trial_onset = float(onset_col.iloc[probe_trial_number]) - first_onset
+
+    # prior trials (strictly before the probe) at their true duration -> references
+    refs = events_df[events_df["trial_number"] < probe_trial_number].copy()
+    ref_onsets = (refs["onset"].astype(float) - first_onset).tolist()
+    ref_durs = refs["duration"].astype(float).tolist()
+
+    betas = []
+    for win_onset in sliding_window_onsets(trial_onset, box=box):
+        rows = {
+            "onset": ref_onsets + [win_onset],
+            "duration": ref_durs + [float(box)],
+            "trial_type": ["reference"] * len(ref_onsets) + ["probe"],
+        }
+        events = pd.DataFrame(rows)
+        vol_idx = causal_volume_indices(win_onset, box)
+        betas.append(_fit_probe_beta(vols4d, union_mask_img, boldref_nib,
+                                     events, vol_idx[-1]))
+    return np.asarray(betas)
 
 
 def avgbold_beta_for_trial(vols4d, events_df, union_mask_img, trial_number):
@@ -418,13 +499,17 @@ def avgbold_beta_for_trial(vols4d, events_df, union_mask_img, trial_number):
 # ==========================================================================
 def compute_betas(cfg, union_mask_img, boldref_nib, runs, durations, strategies):
     """Compute all betas. Returns dict:
-        betas['glm'][L] -> (n_trials, NUM_VOXELS)
-        betas['avgbold'] -> (n_trials, NUM_VOXELS)
-    plus parallel lists trial_image_names (correct image per trial) and
-    trial_pool_idx kept consistent across strategies (same trial order).
+        betas['glm'][L]         -> (n_trials, NUM_VOXELS)   asymmetric (refs=21s)
+        betas['glm_matched'][L] -> (n_trials, NUM_VOXELS)   matched (refs=L)
+        betas['avgbold']        -> (n_trials, NUM_VOXELS)
+        betas['sliding']        -> (n_trials, n_windows, NUM_VOXELS)
+    plus the parallel list trial_image_names (correct image per trial), kept in
+    a single consistent trial order across all strategies.
     """
     glm_betas = {L: [] for L in durations} if "glm" in strategies else {}
+    matched_betas = {L: [] for L in durations} if "glm_matched" in strategies else {}
     avg_betas = [] if "avgbold" in strategies else None
+    sliding_betas = [] if "sliding" in strategies else None
     trial_image_names = []
 
     for run_num in runs:
@@ -443,13 +528,28 @@ def compute_betas(cfg, union_mask_img, boldref_nib, runs, durations, strategies)
                         glm_beta_for_trial(vols4d, events_df, union_mask_img,
                                            trial, float(L), boldref_nib)
                     )
+            if "glm_matched" in strategies:
+                for L in durations:
+                    matched_betas[L].append(
+                        glm_matched_beta_for_trial(vols4d, events_df, union_mask_img,
+                                                   trial, float(L), boldref_nib)
+                    )
+            if "sliding" in strategies:
+                sliding_betas.append(
+                    sliding_beta_for_trial(vols4d, events_df, union_mask_img,
+                                           trial, boldref_nib)
+                )
         print(f"  run {run_num}: {n_trials} trials done", flush=True)
 
     out = {}
     if "glm" in strategies:
         out["glm"] = {L: np.asarray(v) for L, v in glm_betas.items()}
+    if "glm_matched" in strategies:
+        out["glm_matched"] = {L: np.asarray(v) for L, v in matched_betas.items()}
     if "avgbold" in strategies:
         out["avgbold"] = np.asarray(avg_betas)
+    if "sliding" in strategies:
+        out["sliding"] = np.asarray(sliding_betas)  # (n_trials, n_windows, NUM_VOXELS)
     return out, trial_image_names
 
 
@@ -476,63 +576,63 @@ def analyze(cfg, betas, trial_image_names, clip_img_embedder, predict_fn, device
 
     results = {"trial_image_names": trial_image_names, "foil_names": foil_names}
 
-    if "glm" in strategies:
-        results["glm"] = {}
-        for L in durations:
-            b = betas["glm"][L]
-            z = causal_zscore_betas(b)
-            preds = [predict_fn(torch.from_numpy(np.asarray(z[t], dtype=np.float32))
-                                .reshape(1, 1, NUM_VOXELS)) for t in range(len(z))]
-            cpd = np.asarray([cpd_from_embeddings(correct=correct_embeds[t],
-                                                  foil=foil_embeds[t], pred=preds[t])
-                              for t in range(len(preds))])
-            results["glm"][L] = {
-                "cpd": cpd,
-                "twoafc": pairmate_2afc_accuracy(preds, correct_embeds, foil_embeds),
-                "retrieval": forward_retrieval_accuracy(preds, correct_pool_idx, pool_embeds),
-            }
-            print(f"  GLM L={L:>2}s  meanCPD={cpd.mean():+.3f}  "
-                  f"2AFC={results['glm'][L]['twoafc']:.2f}  "
-                  f"ret={results['glm'][L]['retrieval']:.2f}", flush=True)
-
-    if "avgbold" in strategies:
-        b = betas["avgbold"]
+    def score(b):
+        """Causal z-score -> predict -> CPD/2-AFC/retrieval for a (n_trials, NUM_VOXELS) matrix."""
         z = causal_zscore_betas(b)
         preds = [predict_fn(torch.from_numpy(np.asarray(z[t], dtype=np.float32))
                             .reshape(1, 1, NUM_VOXELS)) for t in range(len(z))]
         cpd = np.asarray([cpd_from_embeddings(correct=correct_embeds[t],
                                               foil=foil_embeds[t], pred=preds[t])
                           for t in range(len(preds))])
-        results["avgbold"] = {
+        return {
             "cpd": cpd,
             "twoafc": pairmate_2afc_accuracy(preds, correct_embeds, foil_embeds),
             "retrieval": forward_retrieval_accuracy(preds, correct_pool_idx, pool_embeds),
         }
-        print(f"  AVGBOLD  meanCPD={cpd.mean():+.3f}  "
-              f"2AFC={results['avgbold']['twoafc']:.2f}  "
-              f"ret={results['avgbold']['retrieval']:.2f}", flush=True)
 
+    for key, label in (("glm", "GLM"), ("glm_matched", "GLMm")):
+        if key in strategies:
+            results[key] = {}
+            for L in durations:
+                r = score(betas[key][L])
+                results[key][L] = r
+                print(f"  {label} L={L:>2}s  meanCPD={r['cpd'].mean():+.3f}  "
+                      f"2AFC={r['twoafc']:.2f}  ret={r['retrieval']:.2f}", flush=True)
+
+    if "avgbold" in strategies:
+        r = score(betas["avgbold"])
+        results["avgbold"] = r
+        print(f"  AVGBOLD  meanCPD={r['cpd'].mean():+.3f}  "
+              f"2AFC={r['twoafc']:.2f}  ret={r['retrieval']:.2f}", flush=True)
+
+    # 'sliding' has no CPD summary here -- its deliverable is reliability
+    # (computed from the cached betas by cpd_reliability.py).
     return results
 
 
 def save_results(out_dir, betas, results, durations, strategies):
     os.makedirs(out_dir, exist_ok=True)
-    if "glm" in strategies:
-        np.save(os.path.join(out_dir, "glm_cpd_per_trial.npy"),
-                np.stack([results["glm"][L]["cpd"] for L in durations]))  # (n_dur, n_trials)
-        np.save(os.path.join(out_dir, "glm_durations.npy"), np.asarray(durations))
-        np.save(os.path.join(out_dir, "glm_2afc.npy"),
-                np.asarray([results["glm"][L]["twoafc"] for L in durations]))
-        np.save(os.path.join(out_dir, "glm_retrieval.npy"),
-                np.asarray([results["glm"][L]["retrieval"] for L in durations]))
-        for L in durations:
-            np.save(os.path.join(out_dir, f"glm_betas_L{L:02d}.npy"), betas["glm"][L])
+    # both per-duration GLM variants share the same on-disk layout, distinguished
+    # by a filename prefix ("glm" asymmetric, "glm_matched" matched-length).
+    for key in ("glm", "glm_matched"):
+        if key in strategies:
+            np.save(os.path.join(out_dir, f"{key}_cpd_per_trial.npy"),
+                    np.stack([results[key][L]["cpd"] for L in durations]))  # (n_dur, n_trials)
+            np.save(os.path.join(out_dir, f"{key}_durations.npy"), np.asarray(durations))
+            np.save(os.path.join(out_dir, f"{key}_2afc.npy"),
+                    np.asarray([results[key][L]["twoafc"] for L in durations]))
+            np.save(os.path.join(out_dir, f"{key}_retrieval.npy"),
+                    np.asarray([results[key][L]["retrieval"] for L in durations]))
+            for L in durations:
+                np.save(os.path.join(out_dir, f"{key}_betas_L{L:02d}.npy"), betas[key][L])
     if "avgbold" in strategies:
         np.save(os.path.join(out_dir, "avgbold_cpd_per_trial.npy"), results["avgbold"]["cpd"])
         np.save(os.path.join(out_dir, "avgbold_betas.npy"), betas["avgbold"])
         with open(os.path.join(out_dir, "avgbold_summary.json"), "w") as f:
             json.dump({"twoafc": results["avgbold"]["twoafc"],
                        "retrieval": results["avgbold"]["retrieval"]}, f, indent=2)
+    if "sliding" in strategies:
+        np.save(os.path.join(out_dir, "sliding_betas.npy"), betas["sliding"])
     pd.DataFrame({"image_name": results["trial_image_names"],
                   "foil_name": results["foil_names"]}).to_csv(
         os.path.join(out_dir, "trial_images.csv"), index=False)
@@ -602,14 +702,15 @@ def plot_results(out_dir, results, durations, strategies):
 def load_cached_results(out_dir, strategies):
     """Rebuild the `results` dict from cached .npy/.json (for --replot)."""
     results, durations = {}, []
-    if "glm" in strategies:
-        durations = np.load(os.path.join(out_dir, "glm_durations.npy")).tolist()
-        cpd = np.load(os.path.join(out_dir, "glm_cpd_per_trial.npy"))      # (n_dur, n_trials)
-        twoafc = np.load(os.path.join(out_dir, "glm_2afc.npy"))
-        ret = np.load(os.path.join(out_dir, "glm_retrieval.npy"))
-        results["glm"] = {L: {"cpd": cpd[i], "twoafc": float(twoafc[i]),
-                              "retrieval": float(ret[i])}
-                          for i, L in enumerate(durations)}
+    for key in ("glm", "glm_matched"):
+        if key in strategies:
+            durations = np.load(os.path.join(out_dir, f"{key}_durations.npy")).tolist()
+            cpd = np.load(os.path.join(out_dir, f"{key}_cpd_per_trial.npy"))  # (n_dur, n_trials)
+            twoafc = np.load(os.path.join(out_dir, f"{key}_2afc.npy"))
+            ret = np.load(os.path.join(out_dir, f"{key}_retrieval.npy"))
+            results[key] = {L: {"cpd": cpd[i], "twoafc": float(twoafc[i]),
+                                "retrieval": float(ret[i])}
+                            for i, L in enumerate(durations)}
     if "avgbold" in strategies:
         with open(os.path.join(out_dir, "avgbold_summary.json")) as f:
             summ = json.load(f)
@@ -626,11 +727,14 @@ def load_cached_betas(out_dir, durations, strategies):
     refitting any GLMs -- e.g. after changing the z-scoring scheme.
     """
     betas = {}
-    if "glm" in strategies:
-        betas["glm"] = {L: np.load(os.path.join(out_dir, f"glm_betas_L{L:02d}.npy"))
-                        for L in durations}
+    for key in ("glm", "glm_matched"):
+        if key in strategies:
+            betas[key] = {L: np.load(os.path.join(out_dir, f"{key}_betas_L{L:02d}.npy"))
+                          for L in durations}
     if "avgbold" in strategies:
         betas["avgbold"] = np.load(os.path.join(out_dir, "avgbold_betas.npy"))
+    if "sliding" in strategies:
+        betas["sliding"] = np.load(os.path.join(out_dir, "sliding_betas.npy"))
     trial_image_names = pd.read_csv(
         os.path.join(out_dir, "trial_images.csv"))["image_name"].tolist()
     return betas, trial_image_names
