@@ -492,6 +492,20 @@ class TestRepeatReliability:
         names = ["a", "b", "a", "b"]
         assert repeat_reliability(betas, names) == pytest.approx(1.0, abs=1e-9)
 
+    def test_mean_center_removes_shared_baseline(self):
+        # a huge per-voxel baseline shared by all trials makes raw r ~ +1 for any
+        # pair; mean-centering exposes the (here anti-correlated) image-specific part
+        base = np.array([100.0, 200.0, 300.0, 400.0])
+        betas = np.array([
+            base + np.array([1.0, 0.0, 0.0, 0.0]),   # a, repeat 1
+            base + np.array([0.0, 1.0, 0.0, 0.0]),   # b, repeat 1
+            base + np.array([-1.0, 0.0, 0.0, 0.0]),  # a, repeat 2 (anti to a r1)
+            base + np.array([0.0, -1.0, 0.0, 0.0]),  # b, repeat 2 (anti to b r1)
+        ])
+        names = ["a", "b", "a", "b"]
+        assert repeat_reliability(betas, names, mean_center=False) > 0.99
+        assert repeat_reliability(betas, names, mean_center=True) < 0.0
+
     def test_correlates_over_voxel_axis_only(self):
         # adding a constant offset per repeat must not change Pearson (mean-invariant)
         betas = np.array([

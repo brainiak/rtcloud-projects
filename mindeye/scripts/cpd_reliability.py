@@ -54,13 +54,23 @@ def _pearson(x, y):
     return float(np.corrcoef(x, y)[0, 1])
 
 
-def repeat_reliability(betas, trial_image_names, return_per_image=False):
+def repeat_reliability(betas, trial_image_names, mean_center=False,
+                       return_per_image=False):
     """Mean across-repeat Pearson correlation for a (n_trials, n_vox) beta matrix.
 
     Correlates each image's two repeats over the voxel axis, then averages over
     images. With ``return_per_image`` also returns the per-image correlation array.
+
+    ``mean_center`` removes the across-trial (across-condition) mean pattern --
+    i.e. each voxel's average beta over all trials -- before correlating. This is
+    essential: raw betas that still carry a voxel-wise baseline shared by *every*
+    trial (e.g. un-detrended averaged BOLD) correlate ~1 across any two trials,
+    image-matched or not, inflating "reliability" with non-image-specific signal.
+    Mean-centering isolates the *image-specific* reliability.
     """
     betas = np.asarray(betas, dtype=np.float64)
+    if mean_center:
+        betas = betas - betas.mean(axis=0, keepdims=True)
     pairs = pair_repeats(trial_image_names)
     per_image = np.array([_pearson(betas[i], betas[j]) for i, j in pairs])
     mean = float(np.nanmean(per_image))
@@ -78,14 +88,18 @@ def cross_approach_correlation(betas_a, betas_b):
     return float(np.nanmean(per_trial))
 
 
-def within_presentation_reliability(sliding_betas):
+def within_presentation_reliability(sliding_betas, mean_center=False):
     """Pseudo-repeat reliability: mean pairwise window correlation *within* a trial.
 
     ``sliding_betas`` is (n_trials, n_windows, n_vox). For each trial we average
     the Pearson correlations over all distinct window pairs, then average across
     trials. Measures within-presentation temporal stability of the 3 s windows.
+    ``mean_center`` removes each window's across-trial mean pattern first (see
+    :func:`repeat_reliability`).
     """
     sb = np.asarray(sliding_betas, dtype=np.float64)
+    if mean_center:
+        sb = sb - sb.mean(axis=0, keepdims=True)  # per (window, voxel) over trials
     n_trials, n_win, _ = sb.shape
     trial_means = []
     for t in range(n_trials):
@@ -111,34 +125,50 @@ def _load_per_duration(out_dir, key):
 # ==========================================================================
 # Orchestration
 # ==========================================================================
-def compute_all(out_dir):
-    """Compute every reliability summary from cached betas. Returns a dict."""
-    trial_image_names = pd.read_csv(
-        os.path.join(out_dir, "trial_images.csv"))["image_name"].tolist()
+def _demean(b):
+    """Remove the across-trial mean pattern (per voxel) -> image-specific betas."""
+    b = np.asarray(b, dtype=np.float64)
+    return b - b.mean(axis=0, keepdims=True)
 
-    res = {"trial_image_names": trial_image_names}
+
+def compute_all(out_dir):
+    """Compute every reliability summary from cached betas. Returns a dict.
+
+    The *primary* reliability everywhere is image-specific (across-trial mean
+    removed; ``mean_center=True``). Raw (non-centered) reliability is also kept
+    under ``*_raw`` keys to expose the baseline-driven inflation as a diagnostic.
+    """
+    names = pd.read_csv(os.path.join(out_dir, "trial_images.csv"))["image_name"].tolist()
+    res = {"trial_image_names": names}
+
+    def rel(b):
+        return repeat_reliability(b, names, mean_center=True)
+
+    def rel_raw(b):
+        return repeat_reliability(b, names, mean_center=False)
 
     # per-duration GLM variants -------------------------------------------
     glm = _load_per_duration(out_dir, "glm")
     matched = _load_per_duration(out_dir, "glm_matched")
     res["glm_durations"] = sorted(glm)
     res["matched_durations"] = sorted(matched)
-    res["glm_reliability"] = np.array(
-        [repeat_reliability(glm[L], trial_image_names) for L in sorted(glm)])
-    res["matched_reliability"] = np.array(
-        [repeat_reliability(matched[L], trial_image_names) for L in sorted(matched)])
+    res["glm_reliability"] = np.array([rel(glm[L]) for L in sorted(glm)])
+    res["glm_reliability_raw"] = np.array([rel_raw(glm[L]) for L in sorted(glm)])
+    res["matched_reliability"] = np.array([rel(matched[L]) for L in sorted(matched)])
+    res["matched_reliability_raw"] = np.array([rel_raw(matched[L]) for L in sorted(matched)])
 
-    # asym-vs-matched cross-correlation per shared L ----------------------
+    # asym-vs-matched cross-correlation per shared L (image-specific) -----
     shared_L = sorted(set(glm) & set(matched))
     res["asym_vs_matched_L"] = shared_L
     res["asym_vs_matched_corr"] = np.array(
-        [cross_approach_correlation(glm[L], matched[L]) for L in shared_L])
+        [cross_approach_correlation(_demean(glm[L]), _demean(matched[L])) for L in shared_L])
 
     # averaged-BOLD -------------------------------------------------------
     avg_path = os.path.join(out_dir, "avgbold_betas.npy")
     if os.path.exists(avg_path):
         avg = np.load(avg_path)
-        res["avgbold_reliability"] = repeat_reliability(avg, trial_image_names)
+        res["avgbold_reliability"] = rel(avg)
+        res["avgbold_reliability_raw"] = rel_raw(avg)
     else:
         avg = None
 
@@ -149,26 +179,27 @@ def compute_all(out_dir):
         n_win = sliding.shape[1]
         res["sliding_window_times"] = np.array(sliding_window_onsets(0.0))[:n_win]
         res["sliding_per_window_reliability"] = np.array(
-            [repeat_reliability(sliding[:, w, :], trial_image_names)
-             for w in range(n_win)])
-        res["sliding_avg_reliability"] = repeat_reliability(
-            sliding.mean(axis=1), trial_image_names)
-        res["sliding_pseudo_reliability"] = within_presentation_reliability(sliding)
+            [rel(sliding[:, w, :]) for w in range(n_win)])
+        res["sliding_avg_reliability"] = rel(sliding.mean(axis=1))
+        res["sliding_avg_reliability_raw"] = rel_raw(sliding.mean(axis=1))
+        res["sliding_pseudo_reliability"] = within_presentation_reliability(
+            sliding, mean_center=True)
     else:
         sliding = None
 
-    # cross-approach matrix at a representative L (best asym reliability) --
+    # cross-approach matrix at a representative L (best image-specific asym) --
+    # all betas demeaned so the matrix reflects image-specific pattern similarity
     approaches = {}
     if len(glm):
         bestL = sorted(glm)[int(np.nanargmax(res["glm_reliability"]))]
         res["cross_repr_L"] = bestL
-        approaches[f"glm@{bestL}"] = glm[bestL]
+        approaches[f"glm@{bestL}"] = _demean(glm[bestL])
         if bestL in matched:
-            approaches[f"matched@{bestL}"] = matched[bestL]
+            approaches[f"matched@{bestL}"] = _demean(matched[bestL])
     if avg is not None:
-        approaches["avgbold"] = avg
+        approaches["avgbold"] = _demean(avg)
     if sliding is not None:
-        approaches["sliding_avg"] = sliding.mean(axis=1)
+        approaches["sliding_avg"] = _demean(sliding.mean(axis=1))
     labels = list(approaches)
     mat = np.full((len(labels), len(labels)), np.nan)
     for i, a in enumerate(labels):
@@ -202,18 +233,25 @@ def save_reliability(out_dir, res):
         os.path.join(rel_dir, "reliability.npz"),
         glm_durations=np.array(res["glm_durations"]),
         glm_reliability=res["glm_reliability"],
+        glm_reliability_raw=res["glm_reliability_raw"],
         matched_durations=np.array(res["matched_durations"]),
         matched_reliability=res["matched_reliability"],
+        matched_reliability_raw=res["matched_reliability_raw"],
         asym_vs_matched_L=np.array(res["asym_vs_matched_L"]),
         asym_vs_matched_corr=res["asym_vs_matched_corr"],
         sliding_window_times=res.get("sliding_window_times", np.array([])),
         sliding_per_window_reliability=res.get("sliding_per_window_reliability", np.array([])),
         cross_matrix=res["cross_matrix"],
     )
+    def _r(x):
+        return None if x is None or np.isnan(x) else round(float(x), 4)
+
     summary = {
-        "avgbold_reliability": res.get("avgbold_reliability"),
-        "sliding_avg_reliability": res.get("sliding_avg_reliability"),
-        "sliding_pseudo_reliability": res.get("sliding_pseudo_reliability"),
+        "metric": "image-specific repeat reliability (across-trial mean removed)",
+        "avgbold_reliability": _r(res.get("avgbold_reliability")),
+        "avgbold_reliability_raw": _r(res.get("avgbold_reliability_raw")),
+        "sliding_avg_reliability": _r(res.get("sliding_avg_reliability")),
+        "sliding_pseudo_reliability": _r(res.get("sliding_pseudo_reliability")),
         "cross_repr_L": res.get("cross_repr_L"),
         "cross_labels": res.get("cross_labels"),
         "ranking": [[lbl, None if np.isnan(r) else round(float(r), 4)]
@@ -261,7 +299,7 @@ def plot_reliability(rel_dir, res):
         ax.axhline(res["sliding_pseudo_reliability"], color="tab:purple", ls=":",
                    label=f"pseudo-repeat ({res['sliding_pseudo_reliability']:.3f})")
         ax.set_xlabel("window onset (s after trial onset)")
-        ax.set_ylabel("repeat reliability (Pearson r)")
+        ax.set_ylabel("image-specific repeat reliability (Pearson r)")
         ax.set_title(f"{SUB} {SESSION}: sliding 3s-window reliability vs time")
         ax.legend(fontsize=8)
         fig.tight_layout()
@@ -315,9 +353,15 @@ def main():
     rel_dir = save_reliability(out_dir, res)
     plot_reliability(rel_dir, res)
 
-    print(f"\nreliability summary ({SUB} {SESSION}) -- highest repeat correlation first:")
+    print(f"\nimage-specific repeat reliability ({SUB} {SESSION}) "
+          f"-- across-trial mean removed, highest first:")
     for lbl, r in _ranked_summary(res):
         print(f"  {lbl:<28} r = {r:.4f}")
+    if "avgbold_reliability_raw" in res:
+        print(f"\nNOTE: raw (non-centered) reliability is dominated by the per-voxel "
+              f"baseline shared by every trial and is NOT image-specific. "
+              f"e.g. avg-BOLD raw r = {res['avgbold_reliability_raw']:.3f} but "
+              f"image-specific r = {res['avgbold_reliability']:.3f}.")
     print(f"\nsaved arrays + 4 plots -> {rel_dir}")
 
 
