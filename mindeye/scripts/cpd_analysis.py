@@ -638,6 +638,77 @@ def save_results(out_dir, betas, results, durations, strategies):
         os.path.join(out_dir, "trial_images.csv"), index=False)
 
 
+def _offline_metric(out_dir, stimdur, col):
+    """Mean of a per-trial column from the offline GLMsingle benchmark, or None.
+
+    Reads cross_offline/offline_per_trial_stimdur-{NN}.csv (the offline benchmark
+    exports). col is e.g. "twoafc_explicit" or "top1_is_correct".
+    """
+    import csv
+    path = os.path.join(out_dir, "verify", "cross_offline",
+                        f"offline_per_trial_stimdur-{stimdur:02d}.csv")
+    if not os.path.exists(path):
+        return None
+    rows = list(csv.DictReader(open(path)))
+    if not rows:
+        return None
+    return sum(float(r[col]) for r in rows) / len(rows)
+
+
+def _retrieval_pool_size(out_dir, results, durations):
+    """Unique-image retrieval pool size (chance = 1/pool). Reads trial_images.csv,
+    falling back to n_trials//2 (each image shown twice)."""
+    import csv
+    ti = os.path.join(out_dir, "trial_images.csv")
+    if os.path.exists(ti):
+        return len({r["image_name"] for r in csv.DictReader(open(ti))})
+    any_key = next(k for k in ("glm", "glm_matched") if k in results)
+    return len(results[any_key][durations[0]]["cpd"]) // 2
+
+
+def _plot_metric_vs_duration(out_dir, results, durations, strategies, plt, spec):
+    """One metric (2-AFC or retrieval) vs modeled length, both GLM variants overlaid.
+
+    asym + matched real-time GLM curves and the avg-BOLD/chance references stay
+    in the legend; the offline GLMsingle benchmark is drawn as black dash-dot
+    lines annotated with floating label boxes (one per stimdur).
+    """
+    import matplotlib.transforms as mtransforms
+
+    glm_series = [("glm", "asym GLM", "tab:blue", "o"),
+                  ("glm_matched", "matched GLM", "tab:orange", "s")]
+    glm_series = [g for g in glm_series if g[0] in strategies]
+
+    fig, ax = plt.subplots(figsize=(7, 5))
+    for key, klabel, color, marker in glm_series:
+        ax.plot(durations, [results[key][L][spec["metric"]] for L in durations],
+                marker=marker, color=color, label=f"real-time {klabel}")
+    if "avgbold" in strategies:
+        ax.axhline(results["avgbold"][spec["metric"]], color="dimgray", ls="--",
+                   alpha=0.7, label="avg-BOLD")
+    ax.axhline(spec["chance_y"], color="gray", lw=0.8, ls=":", label=spec["chance_label"])
+    ax.legend(loc="best")
+
+    # offline benchmark: black dash-dot lines with floating label boxes (no legend).
+    # lower value labeled below its line, higher above, to avoid overlap.
+    trans = mtransforms.blended_transform_factory(ax.transAxes, ax.transData)
+    offs = [(d, _offline_metric(out_dir, d, spec["off_col"])) for d in (3, 21)]
+    offs = sorted([(d, v) for d, v in offs if v is not None], key=lambda x: x[1])
+    for rank, (d, v) in enumerate(offs):
+        ax.axhline(v, color="black", ls="-.", alpha=0.8)
+        va = "top" if (rank == 0 and len(offs) > 1) else "bottom"
+        ax.text(0.02, v, f"offline {spec['off_label']} (stimdur {d}s) = {v:.3f}",
+                transform=trans, va=va, ha="left", fontsize=8, color="black",
+                bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="black", alpha=0.9))
+
+    ax.set_xlabel("modeled stimulus length (s)")
+    ax.set_ylabel(spec["ylabel"])
+    ax.set_title(f"{SUB} {SESSION}: {spec['title']} vs modeled stimulus length")
+    fig.tight_layout()
+    fig.savefig(os.path.join(out_dir, spec["fname"]), dpi=150)
+    plt.close(fig)
+
+
 def plot_results(out_dir, results, durations, strategies):
     import matplotlib
     matplotlib.use("Agg")
@@ -680,23 +751,20 @@ def plot_results(out_dir, results, durations, strategies):
         fig.savefig(os.path.join(out_dir, "cpd_per_trial_heatmap.png"), dpi=150)
         plt.close(fig)
 
-        # retrieval vs duration
-        fig, ax = plt.subplots(figsize=(7, 5))
-        ax.plot(durations, [results["glm"][L]["twoafc"] for L in durations],
-                marker="o", label="pairmate 2-AFC")
-        ax.plot(durations, [results["glm"][L]["retrieval"] for L in durations],
-                marker="s", label="top-1 retrieval")
-        if "avgbold" in strategies:
-            ax.axhline(results["avgbold"]["twoafc"], color="tab:blue", ls="--", alpha=0.6)
-            ax.axhline(results["avgbold"]["retrieval"], color="tab:orange", ls="--", alpha=0.6)
-        ax.axhline(0.5, color="gray", lw=0.8, ls=":")
-        ax.set_xlabel("modeled stimulus length (s)")
-        ax.set_ylabel("accuracy")
-        ax.set_title(f"{SUB} {SESSION}: retrieval vs modeled stimulus length")
-        ax.legend()
-        fig.tight_layout()
-        fig.savefig(os.path.join(out_dir, "retrieval_vs_duration.png"), dpi=150)
-        plt.close(fig)
+        # 2-AFC + retrieval vs duration: one plot each, both GLM variants overlaid
+        pool_size = _retrieval_pool_size(out_dir, results, durations)
+        for spec in (
+            dict(metric="twoafc", off_col="twoafc_explicit", off_label="2-AFC",
+                 ylabel="pairmate 2-AFC accuracy", title="pairmate 2-AFC",
+                 chance_y=0.5, chance_label="chance (0.5)",
+                 fname="twoafc_vs_duration.png"),
+            dict(metric="retrieval", off_col="top1_is_correct", off_label="retrieval",
+                 ylabel="top-1 retrieval accuracy", title="top-1 retrieval",
+                 chance_y=1.0 / pool_size,
+                 chance_label=f"chance (1/{pool_size}={1.0/pool_size:.3f})",
+                 fname="retrieval_vs_duration.png"),
+        ):
+            _plot_metric_vs_duration(out_dir, results, durations, strategies, plt, spec)
 
 
 def load_cached_results(out_dir, strategies):
