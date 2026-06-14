@@ -655,6 +655,27 @@ def _offline_metric(out_dir, stimdur, col):
     return sum(float(r[col]) for r in rows) / len(rows)
 
 
+def _draw_offline_benchmark(ax, out_dir, col, label_prefix):
+    """Overlay the offline GLMsingle benchmark (one line per stimdur) as black
+    dash-dot lines with floating value labels (no legend entry). The lower value
+    is labeled at the left edge, the higher at the right edge, so labels never
+    overlap even when the two offline values are close (e.g. CPD)."""
+    import matplotlib.transforms as mtransforms
+    offs = sorted([(d, v) for d in (3, 21)
+                   for v in (_offline_metric(out_dir, d, col),) if v is not None],
+                  key=lambda x: x[1])
+    if not offs:
+        return
+    trans = mtransforms.blended_transform_factory(ax.transAxes, ax.transData)
+    placements = [(0.02, "left"), (0.98, "right")]
+    for i, (d, v) in enumerate(offs):
+        ax.axhline(v, color="black", ls="-.", alpha=0.8)
+        x, ha = placements[i if len(offs) > 1 else 0]
+        ax.text(x, v, f"offline {label_prefix} (stimdur {d}s) = {v:.3f}",
+                transform=trans, va="top", ha=ha, fontsize=8, color="black",
+                bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="black", alpha=0.9))
+
+
 def _retrieval_pool_size(out_dir, results, durations):
     """Unique-image retrieval pool size (chance = 1/pool). Reads trial_images.csv,
     falling back to n_trials//2 (each image shown twice)."""
@@ -673,8 +694,6 @@ def _plot_metric_vs_duration(out_dir, results, durations, strategies, plt, spec)
     in the legend; the offline GLMsingle benchmark is drawn as black dash-dot
     lines annotated with floating label boxes (one per stimdur).
     """
-    import matplotlib.transforms as mtransforms
-
     glm_series = [("glm", "asym GLM", "tab:blue", "o"),
                   ("glm_matched", "matched GLM", "tab:orange", "s")]
     glm_series = [g for g in glm_series if g[0] in strategies]
@@ -687,19 +706,9 @@ def _plot_metric_vs_duration(out_dir, results, durations, strategies, plt, spec)
         ax.axhline(results["avgbold"][spec["metric"]], color="dimgray", ls="--",
                    alpha=0.7, label="avg-BOLD")
     ax.axhline(spec["chance_y"], color="gray", lw=0.8, ls=":", label=spec["chance_label"])
-    ax.legend(loc="best")
-
-    # offline benchmark: black dash-dot lines with floating label boxes (no legend).
-    # lower value labeled below its line, higher above, to avoid overlap.
-    trans = mtransforms.blended_transform_factory(ax.transAxes, ax.transData)
-    offs = [(d, _offline_metric(out_dir, d, spec["off_col"])) for d in (3, 21)]
-    offs = sorted([(d, v) for d, v in offs if v is not None], key=lambda x: x[1])
-    for rank, (d, v) in enumerate(offs):
-        ax.axhline(v, color="black", ls="-.", alpha=0.8)
-        va = "top" if (rank == 0 and len(offs) > 1) else "bottom"
-        ax.text(0.02, v, f"offline {spec['off_label']} (stimdur {d}s) = {v:.3f}",
-                transform=trans, va=va, ha="left", fontsize=8, color="black",
-                bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="black", alpha=0.9))
+    # offline lines sit at the top; keep the legend low so it can't collide with them
+    ax.legend(loc=spec.get("legend_loc", "lower right"))
+    _draw_offline_benchmark(ax, out_dir, spec["off_col"], spec["off_label"])
 
     ax.set_xlabel("modeled stimulus length (s)")
     ax.set_ylabel(spec["ylabel"])
@@ -730,10 +739,11 @@ def plot_results(out_dir, results, durations, strategies):
                             ab.mean() + ab.std() / np.sqrt(len(ab)),
                             color="tab:red", alpha=0.15)
         ax.axhline(0, color="gray", lw=0.8)
+        ax.legend(loc="lower right")  # offline CPD lines sit at the top
+        _draw_offline_benchmark(out_dir=out_dir, ax=ax, col="cpd", label_prefix="CPD")
         ax.set_xlabel("modeled stimulus length (s)")
         ax.set_ylabel("CPD  (+1 correct / -1 foil)")
         ax.set_title(f"{SUB} {SESSION}: CPD vs modeled stimulus length")
-        ax.legend()
         fig.tight_layout()
         fig.savefig(os.path.join(out_dir, "cpd_vs_duration.png"), dpi=150)
         plt.close(fig)
@@ -756,11 +766,11 @@ def plot_results(out_dir, results, durations, strategies):
         for spec in (
             dict(metric="twoafc", off_col="twoafc_explicit", off_label="2-AFC",
                  ylabel="pairmate 2-AFC accuracy", title="pairmate 2-AFC",
-                 chance_y=0.5, chance_label="chance (0.5)",
+                 chance_y=0.5, chance_label="chance (0.5)", legend_loc="lower left",
                  fname="twoafc_vs_duration.png"),
             dict(metric="retrieval", off_col="top1_is_correct", off_label="retrieval",
                  ylabel="top-1 retrieval accuracy", title="top-1 retrieval",
-                 chance_y=1.0 / pool_size,
+                 chance_y=1.0 / pool_size, legend_loc="lower right",
                  chance_label=f"chance (1/{pool_size}={1.0/pool_size:.3f})",
                  fname="retrieval_vs_duration.png"),
         ):

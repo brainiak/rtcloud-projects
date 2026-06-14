@@ -236,7 +236,14 @@ def main():
     # Summary comparison vs real-time (causal-z numbers)
     # =====================================================================
     print("\n=== SUMMARY: 2-AFC ===")
-    print("  real-time (causal-z, this decoder):  L03=0.736  L21=0.792")
+    try:  # report the actual cached real-time 2-AFC (avoid stale hardcoded values)
+        rt_dur = np.load(os.path.join(out_root, "glm_durations.npy")).astype(int).tolist()
+        rt_afc = np.load(os.path.join(out_root, "glm_2afc.npy"))
+        rt = {L: a for L, a in zip(rt_dur, rt_afc)}
+        print(f"  real-time (causal-z, this decoder):  "
+              f"L03={rt.get(3, float('nan')):.3f}  L21={rt.get(21, float('nan')):.3f}")
+    except FileNotFoundError:
+        print("  real-time (causal-z, this decoder):  [cached glm_2afc.npy not found]")
     for sd, afc, top1, mrank, nagree in headline:
         print(f"  offline stimdur-{sd} through this decoder: 2AFC={afc:.3f}")
     print(f"\noutputs -> {cross_dir}")
