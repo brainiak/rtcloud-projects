@@ -19,8 +19,10 @@ this script:
      explicit 2-AFC + CPD + 36-way retrieval), so we can tell whether the
      real-time-vs-offline 2-AFC gap follows the *betas* or the *scoring code*.
 
-Outputs -> ``cpd_ses-07/verify/cross_offline/``.
+Outputs -> ``<ckpt out_dir>/verify/cross_offline/`` (e.g. cpd_ses-07/verify/cross_offline/
+for ses01, cpd_ses-07/ckpt-ses-01-03/verify/cross_offline/ for ses0103).
 """
+import argparse
 import os
 import sys
 
@@ -35,11 +37,19 @@ sys.path.insert(0, os.path.abspath(os.path.join(_HERE, "..", "models")))
 import cpd_analysis as C
 from utils_mindeye import cpd_from_embeddings
 
+# Images are checkpoint-independent; the offline betas must match the active decoder's
+# voxel space (2792 for ses01, 8627 for ses0103 -> the *_unionmask_ses-01-03 tensors).
 OFFLINE_FILES = {
     "img03": "sub-005_ses-07_stimdur-03",
     "img21": "sub-005_ses-07_images_stimdur-21",
     "vox03": "sub-005_ses-07_vox_stimdur-03",
     "vox21": "sub-005_ses-07_vox_stimdur-21",
+}
+OFFLINE_VOX = {  # per-checkpoint offline beta tensors (override vox03/vox21)
+    "ses01":   {"vox03": "sub-005_ses-07_vox_stimdur-03",
+                "vox21": "sub-005_ses-07_vox_stimdur-21"},
+    "ses0103": {"vox03": "sub-005_ses-07_vox_stimdur-03_unionmask_ses-01-03",
+                "vox21": "sub-005_ses-07_vox_stimdur-21_unionmask_ses-01-03"},
 }
 
 
@@ -59,49 +69,95 @@ def per_trial_spatial_corr(A, B):
 
 
 def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--ckpt", default="ses01", choices=list(C.CHECKPOINTS),
+                    help="decoder checkpoint + offline beta voxel space (default ses01)")
+    ap.add_argument("--overlay-only", action="store_true",
+                    help="emit only the offline_per_trial_stimdur-*.csv overlay inputs "
+                         "(skip the image-sanity + beta-correlation checks, which need the "
+                         "old 2792 layout)")
+    args = ap.parse_args()
+
     cfg = C.load_config()
-    out_root = os.path.join(cfg["derivatives_path"], "cpd_ses-07")
-    off_dir = os.path.join(out_root, "verify", "offline_data")
+    out_root = C.apply_checkpoint(args.ckpt, cfg["derivatives_path"])
+    # offline tensors live under the shared cpd_ses-07/verify/offline_data regardless of ckpt
+    off_dir = os.path.join(cfg["derivatives_path"], "cpd_ses-07", "verify", "offline_data")
     cross_dir = os.path.join(out_root, "verify", "cross_offline")
     os.makedirs(cross_dir, exist_ok=True)
 
+    offline_files = {**OFFLINE_FILES, **OFFLINE_VOX[args.ckpt]}
+
     def load(key):
-        return torch.load(os.path.join(off_dir, OFFLINE_FILES[key]),
+        return torch.load(os.path.join(off_dir, offline_files[key]),
                           map_location="cpu", weights_only=True).float()
 
-    img03, img21 = load("img03"), load("img21")
     vox03, vox21 = load("vox03"), load("vox21")
     n_trials = vox03.shape[0]
-    print(f"offline: images {tuple(img03.shape)}  betas {tuple(vox03.shape)}")
+    print(f"ckpt={args.ckpt} (NUM_VOXELS={C.NUM_VOXELS})  offline betas {tuple(vox03.shape)}")
 
-    # =====================================================================
-    # 1. IMAGE SANITY CHECK
-    # =====================================================================
-    print("\n[1] image sanity check")
-    d_off = float((img03 - img21).abs().max())
-    print(f"  offline stimdur-03 vs stimdur-21 images: max|diff| = {d_off:.3e}  "
-          f"({'IDENTICAL' if d_off < 1e-5 else 'DIFFER !!'})")
-
-    # real-time images in trial order (from trial_images.csv -> load_image_tensor)
+    # trial order (target/foil per trial) -- identical across checkpoints; needed by step 3
     trials = pd.read_csv(os.path.join(out_root, "trial_images.csv"))
     target_names = trials["image_name"].tolist()
     foil_names = trials["foil_name"].tolist()
-    rt_imgs = torch.stack([C.load_image_tensor(cfg, n) for n in target_names])  # (72,3,224,224)
-    O = img21.flatten(1).numpy(); R = rt_imgs.flatten(1).numpy()
-    d_rt = np.abs(O - R).max(axis=1)                            # per-trial max pixel diff
-    img_corr = per_trial_spatial_corr(O, R)                     # per-trial correlation
-    n_match = int((img_corr > 0.99).sum())
-    print(f"  offline vs real-time images (per-trial): {n_match}/{n_trials} match "
-          f"(corr>0.99); mean corr={img_corr.mean():.4f} min={img_corr.min():.4f}; "
-          f"max|pixel diff|={d_rt.max():.3e} (sub-pixel resize/antialias delta, not a reorder)")
-    if n_match < n_trials:
-        bad = np.where(img_corr <= 0.99)[0].tolist()
-        print(f"  !! genuinely mismatching trials (possible reorder): {bad}")
-    order_ok = n_match == n_trials
+    order_ok = True
+
+    if not args.overlay_only:
+        img03, img21 = load("img03"), load("img21")
+        print(f"offline images {tuple(img03.shape)}")
+
+        # =====================================================================
+        # 1. IMAGE SANITY CHECK
+        # =====================================================================
+        print("\n[1] image sanity check")
+        d_off = float((img03 - img21).abs().max())
+        print(f"  offline stimdur-03 vs stimdur-21 images: max|diff| = {d_off:.3e}  "
+              f"({'IDENTICAL' if d_off < 1e-5 else 'DIFFER !!'})")
+
+        # real-time images in trial order (from trial_images.csv -> load_image_tensor)
+        rt_imgs = torch.stack([C.load_image_tensor(cfg, n) for n in target_names])  # (72,3,224,224)
+        O = img21.flatten(1).numpy(); R = rt_imgs.flatten(1).numpy()
+        d_rt = np.abs(O - R).max(axis=1)                            # per-trial max pixel diff
+        img_corr = per_trial_spatial_corr(O, R)                     # per-trial correlation
+        n_match = int((img_corr > 0.99).sum())
+        print(f"  offline vs real-time images (per-trial): {n_match}/{n_trials} match "
+              f"(corr>0.99); mean corr={img_corr.mean():.4f} min={img_corr.min():.4f}; "
+              f"max|pixel diff|={d_rt.max():.3e} (sub-pixel resize/antialias delta, not a reorder)")
+        if n_match < n_trials:
+            bad = np.where(img_corr <= 0.99)[0].tolist()
+            print(f"  !! genuinely mismatching trials (possible reorder): {bad}")
+        order_ok = n_match == n_trials
+
+        # =====================================================================
+        # 2. BETA CORRELATION vs every cached real-time approach
+        # =====================================================================
+        _beta_correlation(cfg, out_root, cross_dir, vox03, vox21, target_names, n_trials)
 
     # =====================================================================
-    # 2. BETA CORRELATION vs every cached real-time approach
+    # 3. CROSS-FEED: offline betas -> this decoder -> 2-AFC / CPD / retrieval
     # =====================================================================
+    headline = _cross_feed(cfg, cross_dir, vox03, vox21, target_names, foil_names,
+                           n_trials, order_ok)
+
+    # =====================================================================
+    # Summary comparison vs real-time (causal-z numbers)
+    # =====================================================================
+    print("\n=== SUMMARY: 2-AFC ===")
+    try:  # report the actual cached real-time 2-AFC (avoid stale hardcoded values)
+        rt_dur = np.load(os.path.join(out_root, "glm_durations.npy")).astype(int).tolist()
+        rt_afc = np.load(os.path.join(out_root, "glm_2afc.npy"))
+        rt = {L: a for L, a in zip(rt_dur, rt_afc)}
+        print(f"  real-time (causal-z, this decoder):  "
+              f"L03={rt.get(3, float('nan')):.3f}  L21={rt.get(21, float('nan')):.3f}")
+    except FileNotFoundError:
+        print("  real-time (causal-z, this decoder):  [cached glm_2afc.npy not found]")
+    for sd, afc, top1, mrank, nagree in headline:
+        print(f"  offline stimdur-{sd} through this decoder: 2AFC={afc:.3f}")
+    print(f"\noutputs -> {cross_dir}")
+
+
+def _beta_correlation(cfg, out_root, cross_dir, vox03, vox21, target_names, n_trials):
+    """Step 2: correlate offline betas vs cached real-time betas (needs the cached
+    glm_betas_L*.npy / avgbold_betas.npy in ``out_root`` in the same voxel space)."""
     print("\n[2] beta correlation (per-trial spatial Pearson r)")
     durations = C.DURATIONS
     # real-time betas are raw -> z-score (global) to match the offline z-scoring
@@ -176,9 +232,10 @@ def main():
         "corr_off21_vs_avgbold": corr_curves["21"]["avgbold"],
     }).to_csv(os.path.join(cross_dir, "beta_correlation_per_trial.csv"), index=False)
 
-    # =====================================================================
-    # 3. CROSS-FEED: offline betas -> this decoder -> 2-AFC / CPD / retrieval
-    # =====================================================================
+
+def _cross_feed(cfg, cross_dir, vox03, vox21, target_names, foil_names, n_trials, order_ok):
+    """Step 3: feed the offline betas through THIS decoder and write the per-trial
+    overlay CSVs (offline_per_trial_stimdur-{03,21}.csv). Returns the headline tuples."""
     print("\n[3] cross-feed: offline betas through THIS decoder")
     if not order_ok:
         print("  WARNING: image order mismatch -> correct/foil mapping may be wrong; "
@@ -231,22 +288,7 @@ def main():
         headline.append((sd, afc, top1, mrank, nagree))
         print(f"  offline stimdur-{sd}: 2AFC={afc:.3f}  top1={top1:.3f}  "
               f"medianRank={mrank:.0f}  agree={nagree}/{n_trials}")
-
-    # =====================================================================
-    # Summary comparison vs real-time (causal-z numbers)
-    # =====================================================================
-    print("\n=== SUMMARY: 2-AFC ===")
-    try:  # report the actual cached real-time 2-AFC (avoid stale hardcoded values)
-        rt_dur = np.load(os.path.join(out_root, "glm_durations.npy")).astype(int).tolist()
-        rt_afc = np.load(os.path.join(out_root, "glm_2afc.npy"))
-        rt = {L: a for L, a in zip(rt_dur, rt_afc)}
-        print(f"  real-time (causal-z, this decoder):  "
-              f"L03={rt.get(3, float('nan')):.3f}  L21={rt.get(21, float('nan')):.3f}")
-    except FileNotFoundError:
-        print("  real-time (causal-z, this decoder):  [cached glm_2afc.npy not found]")
-    for sd, afc, top1, mrank, nagree in headline:
-        print(f"  offline stimdur-{sd} through this decoder: 2AFC={afc:.3f}")
-    print(f"\noutputs -> {cross_dir}")
+    return headline
 
 
 if __name__ == "__main__":

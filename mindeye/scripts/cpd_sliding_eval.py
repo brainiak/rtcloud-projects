@@ -15,8 +15,9 @@ A window i is a 3s box at offset i*1.5s, i.e. covering [i*1.5, i*1.5+3]s post-on
 (center (i+1)*1.5s); with 21s stimuli there are 13 windows (centers 1.5..19.5s).
 
 Reference: the varying-length GLM at L=21 (cached `glm_2afc.npy` etc).
-Outputs -> cpd_ses-07/sliding_eval/.
+Outputs -> <ckpt out_dir>/sliding_eval/.
 """
+import argparse
 import json
 import os
 import sys
@@ -34,15 +35,26 @@ from utils_mindeye import cpd_from_embeddings
 
 
 def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--ckpt", default="ses01", choices=list(C.CHECKPOINTS),
+                    help="decoder checkpoint + voxel mask (default ses01)")
+    ap.add_argument("--betas-dir", default=None,
+                    help="whole-brain (19174) sliding-beta cache dir "
+                         "(default derivatives/cpd_ses-07/wholebrain)")
+    args = ap.parse_args()
+
     cfg = C.load_config()
-    out_root = os.path.join(cfg["derivatives_path"], "cpd_ses-07")
+    out_root = C.apply_checkpoint(args.ckpt, cfg["derivatives_path"])
+    betas_dir = args.betas_dir or os.path.join(cfg["derivatives_path"], "cpd_ses-07", "wholebrain")
     out_dir = os.path.join(out_root, "sliding_eval")
     os.makedirs(out_dir, exist_ok=True)
 
-    sliding = np.load(os.path.join(out_root, "sliding_betas.npy"))  # (n_trials, n_win, n_vox)
+    voxel_mask = C.load_voxel_mask(cfg)  # (19174,) bool -> this checkpoint's NUM_VOXELS
+    sliding = np.load(os.path.join(betas_dir, "sliding_betas.npy"))  # (n_trials, n_win, 19174)
     n_trials, n_win, n_vox = sliding.shape
     centers = [(i + 1) * C.TR_LENGTH for i in range(n_win)]  # window center time (s)
-    print(f"sliding betas {sliding.shape}; {n_win} windows, centers {centers[0]}..{centers[-1]}s")
+    print(f"ckpt={args.ckpt}; sliding betas {sliding.shape}; {n_win} windows, "
+          f"centers {centers[0]}..{centers[-1]}s")
 
     trials = pd.read_csv(os.path.join(out_root, "trial_images.csv"))
     target_names = trials["image_name"].tolist()
@@ -64,7 +76,11 @@ def main():
     correct_pool_idx = [pool_idx[n] for n in target_names]
 
     def score(b2d):
-        """(n_trials, n_vox) raw betas -> dict(meanCPD, twoafc, retrieval)."""
+        """(n_trials, 19174) whole-brain betas -> dict(meanCPD, twoafc, retrieval).
+
+        The active checkpoint's mask selects NUM_VOXELS before z-scoring/inference.
+        """
+        b2d = np.asarray(b2d)[:, voxel_mask]
         z = C.causal_zscore_betas(b2d)
         preds = [predict_fn(torch.from_numpy(np.asarray(z[t], dtype=np.float32))
                             .reshape(1, 1, C.NUM_VOXELS)) for t in range(len(z))]
@@ -73,13 +89,16 @@ def main():
                           for t in range(len(preds))])
         return {"meanCPD": float(cpd.mean()),
                 "twoafc": C.pairmate_2afc_accuracy(preds, correct_embeds, foil_embeds),
-                "retrieval": C.forward_retrieval_accuracy(preds, correct_pool_idx, pool_embeds)}
+                "retrieval": C.forward_retrieval_accuracy(preds, correct_pool_idx, pool_embeds),
+                "cpd_per_trial": cpd}
 
     # ---- 1. per-window --------------------------------------------------------
     print("\n[1] per-window")
     per_window = []
+    cpd_trial_window = np.empty((n_trials, n_win), dtype=float)  # (trial, window center)
     for w in range(n_win):
         r = score(sliding[:, w, :])
+        cpd_trial_window[:, w] = r.pop("cpd_per_trial")
         per_window.append(r)
         print(f"  win {w:2d} (center {centers[w]:4.1f}s): "
               f"meanCPD={r['meanCPD']:+.4f}  2AFC={r['twoafc']:.3f}  ret={r['retrieval']:.3f}")
@@ -99,6 +118,7 @@ def main():
     subset_res = {}
     for name, sel in subsets.items():
         r = score(sliding[:, sel, :].mean(axis=1))
+        r.pop("cpd_per_trial")
         subset_res[name] = {**r, "windows": sel}
         print(f"  {name:18s} (n={len(sel):2d}): meanCPD={r['meanCPD']:+.4f}  "
               f"2AFC={r['twoafc']:.3f}  ret={r['retrieval']:.3f}")
@@ -108,6 +128,7 @@ def main():
     cumulative = []
     for k in range(1, n_win + 1):
         r = score(sliding[:, :k, :].mean(axis=1))
+        r.pop("cpd_per_trial")
         cumulative.append(r)
         print(f"  first {k:2d} win (..{centers[k-1]:4.1f}s): meanCPD={r['meanCPD']:+.4f}  "
               f"2AFC={r['twoafc']:.3f}  ret={r['retrieval']:.3f}")
@@ -135,8 +156,10 @@ def main():
     }
     with open(os.path.join(out_dir, "sliding_eval_summary.json"), "w") as f:
         json.dump(summary, f, indent=2)
+    np.save(os.path.join(out_dir, "sliding_cpd_per_trial.npy"), cpd_trial_window)
 
     _plot(out_dir, centers, per_window, subset_res, cumulative, ref)
+    _plot_per_trial_heatmap(out_dir, centers, cpd_trial_window)
     print(f"\noutputs -> {out_dir}")
 
 
@@ -168,6 +191,33 @@ def _plot(out_dir, centers, per_window, subset_res, cumulative, ref):
     fig.suptitle(f"{C.SUB} {C.SESSION}: sliding 3s-window GLM -- CPD / 2-AFC / retrieval")
     fig.tight_layout()
     fig.savefig(os.path.join(out_dir, "sliding_eval.png"), dpi=150)
+    plt.close(fig)
+
+
+def _plot_per_trial_heatmap(out_dir, centers, cpd_trial_window):
+    """Per-trial CPD for the fixed 3s window swept across time (trial x window center).
+
+    Mirrors cpd_analysis' cpd_per_trial_heatmap, but each column is a single fixed
+    3s box at a given window center rather than a varying-length GLM.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    n_trials = cpd_trial_window.shape[0]
+    absmax = max(float(np.nanpercentile(np.abs(cpd_trial_window), 98)), 1e-6)
+    # half a window-step padding so each column is centered on its time tick
+    half = (centers[1] - centers[0]) / 2 if len(centers) > 1 else 0.75
+    fig, ax = plt.subplots(figsize=(8, 9))
+    im = ax.imshow(cpd_trial_window, aspect="auto", cmap="RdBu_r",
+                   vmin=-absmax, vmax=absmax,
+                   extent=[centers[0] - half, centers[-1] + half, n_trials, 0])
+    ax.set_xlabel("window center time (s post-onset)")
+    ax.set_ylabel("trial (image presentation)")
+    ax.set_title(f"{C.SUB} {C.SESSION}: per-trial CPD, fixed 3s window")
+    fig.colorbar(im, ax=ax, label="CPD")
+    fig.tight_layout()
+    fig.savefig(os.path.join(out_dir, "sliding_cpd_per_trial_heatmap.png"), dpi=150)
     plt.close(fig)
 
 

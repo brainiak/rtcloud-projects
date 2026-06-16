@@ -51,16 +51,48 @@ TR_LENGTH = 1.5
 N_RUNS = 6
 N_VOLS_PER_RUN = 239           # resampled vols 0000..0238 per run
 TRIALS_PER_RUN = 12
-NUM_VOXELS = 2792
+NUM_VOXELS = 2792              # decoder input voxels; set per-checkpoint by apply_checkpoint()
 IMSIZE = 224
 TRUE_STIM_DURATION = 21.0      # real stimulus on-time (s)
 DURATIONS = list(range(1, 22))  # varying-length GLM models: L = 1..21 s
 AVG_BOLD_WINDOW = (4.0, 8.0)   # post-onset window (s) for the no-GLM strategy
 HRF_TAIL = 8.0                 # s of post-stimulus data kept for the causal GLM
-MODEL_NAME = "sub-005_ses-01_task-C_bs24_MST_rishab_MSTsplit_0_avgrepeats_finalmask"
-RELMASK_NAME = "sub-005_ses-01_task-C_relmask.npy"
-BOLDREF_NAME = "sub-005_ses-01_task-C_run-01_space-T1w_boldref.nii.gz"  # ses-01 ref reused
+FINAL_MASK_NAME = "sub-005_final_mask.nii.gz"  # nsdgeneral mask, 19174 true voxels
+WHOLE_BRAIN_NV = 19174         # voxel space betas are fit/cached in (checkpoint-independent)
 STIM_DIR = "all_stimuli/MST_pairs_styleGAN"
+
+# Checkpoint registry. The decoder + its voxel mask are the only things that differ between
+# the ses-01 and ses-01-03 analyses. Betas are ALWAYS fit once in the 19174-voxel whole-brain
+# (final_mask) space; ``mask`` is a 19174-length boolean selecting that checkpoint's voxels,
+# applied to the cached betas just before inference. ``out`` is relative to derivatives_path.
+CHECKPOINTS = {
+    "ses01": dict(
+        model="sub-005_ses-01_task-C_bs24_MST_rishab_MSTsplit_0_avgrepeats_finalmask",
+        mask="sub-005_ses-01_task-C_relmask.npy", num_voxels=2792, out="cpd_ses-07"),
+    "ses0103": dict(
+        model="sub-005_ses-01-03_task-C_bs24_MST_rishab_MSTsplit_unionmask_ses-01-03_finetune",
+        mask="union_mask_from_ses-01-02.npy", num_voxels=8627, out="cpd_ses-07/ckpt-ses-01-03"),
+}
+
+# Active checkpoint config -- defaults to ses01; mutated by apply_checkpoint().
+MODEL_NAME = CHECKPOINTS["ses01"]["model"]
+MASK_NAME = CHECKPOINTS["ses01"]["mask"]
+
+
+def apply_checkpoint(key, derivatives_path=None):
+    """Select the active checkpoint: set the MODEL_NAME/MASK_NAME/NUM_VOXELS module globals
+    and return that checkpoint's default analysis out_dir (joined to derivatives_path if given)."""
+    global MODEL_NAME, MASK_NAME, NUM_VOXELS
+    if key not in CHECKPOINTS:
+        raise ValueError(f"unknown checkpoint {key!r}; choose from {list(CHECKPOINTS)}")
+    spec = CHECKPOINTS[key]
+    MODEL_NAME, MASK_NAME, NUM_VOXELS = spec["model"], spec["mask"], spec["num_voxels"]
+    return spec["out"] if derivatives_path is None else os.path.join(derivatives_path, spec["out"])
+
+
+def load_voxel_mask(cfg):
+    """Boolean (19174,) mask selecting the active checkpoint's voxels from whole-brain betas."""
+    return np.load(os.path.join(cfg["data_path"], MASK_NAME)).astype(bool)
 
 
 # ==========================================================================
@@ -319,20 +351,10 @@ def load_clip_embedder(cfg, device):
     return clip_img_embedder
 
 
-def build_union_mask_img(cfg):
-    """Replicate notebook cells 13-15: map the 2792-voxel relmask back into the
-    19174-voxel nsdgeneral final mask -> a 3D Nifti union mask."""
+def load_final_mask_data(cfg):
+    """3D bool array of the 19174-voxel nsdgeneral final mask (whole-brain GLM fit space)."""
     import nibabel as nib
-    mask_img = nib.load(os.path.join(cfg["data_path"], f"{SUB}_final_mask.nii.gz"))
-    union_mask = np.load(os.path.join(cfg["data_path"], RELMASK_NAME))
-    mask_data = mask_img.get_fdata().astype(bool)
-    true_voxel_indices = np.where(mask_data.ravel())[0]
-    selected = true_voxel_indices[union_mask]
-    new_flat = np.zeros(mask_data.size, dtype=bool)
-    new_flat[selected] = True
-    new_data = new_flat.reshape(mask_data.shape)
-    union_mask_img = nib.Nifti1Image(new_data.astype(np.uint8), affine=mask_img.affine)
-    return union_mask_img
+    return nib.load(os.path.join(cfg["data_path"], FINAL_MASK_NAME)).get_fdata().astype(bool)
 
 
 def _fast_apply_mask(target, mask):
@@ -408,31 +430,46 @@ def make_predict_fn(model, device):
 
 
 # ==========================================================================
-# Beta estimation (one beta vector per trial, in the 2792-voxel union space)
+# Beta estimation (one beta vector per trial, in the 19174-voxel whole-brain
+# final-mask space; sub-selected per checkpoint just before inference)
 # ==========================================================================
-def _make_first_level_model(union_mask_img):
-    """The single canonical FirstLevelModel config shared by every GLM strategy."""
-    from nilearn.glm.first_level import FirstLevelModel
-    return FirstLevelModel(
-        t_r=TR_LENGTH, slice_time_ref=0, hrf_model="glover", drift_model="cosine",
-        drift_order=1, high_pass=0.01, mask_img=union_mask_img, signal_scaling=False,
-        smoothing_fwhm=None, noise_model="ar1", n_jobs=1, verbose=0,
-        memory_level=1, minimize_memory=True,
-    )
+def fast_glm(Y, events, contrast, confounds=None, slice_time_ref=0.,
+             t_r=TR_LENGTH, drift_model="cosine", high_pass=0.01, noise_model="ar1"):
+    """Fast per-voxel GLM via ``run_glm`` on a masked data array.
+
+    Vendored from rtcloud-projects/induction/utils.py:fast_glm, with one change: it
+    returns the FULL per-voxel effect vector (``.effect``) rather than ``.effect.mean()``,
+    since we need a beta per voxel. ``Y`` is (n_samples, n_voxels); design defaults
+    (glover HRF, cosine drift_order=1, high_pass=0.01) match the previous FirstLevelModel.
+    Returns (effect (n_voxels,), design_matrix).
+    """
+    import warnings
+    from nilearn.glm.first_level import make_first_level_design_matrix, run_glm
+    from nilearn.glm.contrasts import expression_to_contrast_vector, compute_contrast
+
+    n_samples = Y.shape[0]
+    frame_times = np.linspace(slice_time_ref * t_r,
+                              (n_samples - 1 + slice_time_ref) * t_r, n_samples)
+    dm = make_first_level_design_matrix(frame_times, events=events, add_regs=confounds,
+                                        drift_model=drift_model, high_pass=high_pass)
+    labels, estimates = run_glm(Y, dm.values, noise_model=noise_model, n_jobs=1)
+    con_map = expression_to_contrast_vector(contrast, dm.columns)
+    with warnings.catch_warnings():  # silence nilearn's per-call contrast_type deprecation
+        warnings.filterwarnings("ignore", message=".*contrast_type.*", category=DeprecationWarning)
+        effect = compute_contrast(labels, estimates, con_map, contrast_type="t").effect
+    return np.asarray(effect, dtype=np.float64).ravel(), dm
 
 
-def _fit_probe_beta(vols4d, union_mask_img, boldref_nib, events, last_vol):
-    """Fit the canonical GLM on volumes 0..last_vol and return the masked 'probe' beta."""
-    from nilearn.image import new_img_like
-    img = new_img_like(boldref_nib, vols4d[..., : last_vol + 1], copy_header=True)
-    glm = _make_first_level_model(union_mask_img)
-    glm.fit(run_imgs=img, events=events)
-    beta = glm.compute_contrast("probe", output_type="effect_size").get_fdata()
-    return _fast_apply_mask(beta, union_mask_img.get_fdata())
+def _fit_probe_beta(vols4d, final_mask_data, events, last_vol, noise_model):
+    """Fit the causal GLM on volumes 0..last_vol (whole brain) -> 'probe' effect per voxel."""
+    Y = _fast_apply_mask(vols4d[..., : last_vol + 1], final_mask_data)  # (T, 19174)
+    effect, _ = fast_glm(Y, events, "probe", t_r=TR_LENGTH, slice_time_ref=0,
+                         drift_model="cosine", high_pass=0.01, noise_model=noise_model)
+    return effect  # (19174,)
 
 
-def glm_beta_for_trial(vols4d, events_df, union_mask_img, probe_trial_number,
-                       probe_duration, boldref_nib, reference_mode="true"):
+def glm_beta_for_trial(vols4d, events_df, final_mask_data, probe_trial_number,
+                       probe_duration, noise_model, reference_mode="true"):
     """Causal/cumulative LSS beta for one probe trial at a given modeled duration.
 
     ``reference_mode`` is forwarded to :func:`build_lss_events`: ``"true"`` keeps
@@ -444,24 +481,24 @@ def glm_beta_for_trial(vols4d, events_df, union_mask_img, probe_trial_number,
     vol_idx = causal_volume_indices(probe_onset, probe_duration)
     events = build_lss_events(events_df, probe_trial_number, probe_duration,
                               reference_mode=reference_mode)
-    return _fit_probe_beta(vols4d, union_mask_img, boldref_nib, events, vol_idx[-1])
+    return _fit_probe_beta(vols4d, final_mask_data, events, vol_idx[-1], noise_model)
 
 
-def glm_matched_beta_for_trial(vols4d, events_df, union_mask_img, probe_trial_number,
-                               probe_duration, boldref_nib):
+def glm_matched_beta_for_trial(vols4d, events_df, final_mask_data, probe_trial_number,
+                               probe_duration, noise_model):
     """Matched-length variant: probe = L AND prior references = L (symmetric)."""
-    return glm_beta_for_trial(vols4d, events_df, union_mask_img, probe_trial_number,
-                              probe_duration, boldref_nib, reference_mode="matched")
+    return glm_beta_for_trial(vols4d, events_df, final_mask_data, probe_trial_number,
+                              probe_duration, noise_model, reference_mode="matched")
 
 
-def sliding_beta_for_trial(vols4d, events_df, union_mask_img, probe_trial_number,
-                           boldref_nib, box=3.0):
+def sliding_beta_for_trial(vols4d, events_df, final_mask_data, probe_trial_number,
+                           noise_model, box=3.0):
     """Per-window betas for one trial: a ``box``-second probe stepped 1 TR at a time.
 
     For each window position (``sliding_window_onsets``) a causal GLM is fit with
     the probe = a ``box``-second boxcar at that position, and all *strictly prior*
     trials kept as 21 s references. Volumes are truncated to
-    ``window_onset + box + hrf_tail``. Returns (n_windows, NUM_VOXELS)."""
+    ``window_onset + box + hrf_tail``. Returns (n_windows, WHOLE_BRAIN_NV)."""
     onset_col = events_df["onset"].astype(float)
     first_onset = float(onset_col.iloc[0])
     trial_onset = float(onset_col.iloc[probe_trial_number]) - first_onset
@@ -480,31 +517,31 @@ def sliding_beta_for_trial(vols4d, events_df, union_mask_img, probe_trial_number
         }
         events = pd.DataFrame(rows)
         vol_idx = causal_volume_indices(win_onset, box)
-        betas.append(_fit_probe_beta(vols4d, union_mask_img, boldref_nib,
-                                     events, vol_idx[-1]))
+        betas.append(_fit_probe_beta(vols4d, final_mask_data, events, vol_idx[-1], noise_model))
     return np.asarray(betas)
 
 
-def avgbold_beta_for_trial(vols4d, events_df, union_mask_img, trial_number):
+def avgbold_beta_for_trial(vols4d, events_df, final_mask_data, trial_number):
     """No-GLM averaged-BOLD beta: mean of masked volumes 4-8 s post-onset."""
     first_onset = float(events_df["onset"].astype(float).iloc[0])
     onset = float(events_df["onset"].astype(float).iloc[trial_number]) - first_onset
     vol_idx = avg_bold_volume_indices(onset)
     avg = vols4d[..., vol_idx].mean(axis=-1)
-    return _fast_apply_mask(avg, union_mask_img.get_fdata())
+    return _fast_apply_mask(avg, final_mask_data)
 
 
 # ==========================================================================
 # Orchestration
 # ==========================================================================
-def compute_betas(cfg, union_mask_img, boldref_nib, runs, durations, strategies):
-    """Compute all betas. Returns dict:
-        betas['glm'][L]         -> (n_trials, NUM_VOXELS)   asymmetric (refs=21s)
-        betas['glm_matched'][L] -> (n_trials, NUM_VOXELS)   matched (refs=L)
-        betas['avgbold']        -> (n_trials, NUM_VOXELS)
-        betas['sliding']        -> (n_trials, n_windows, NUM_VOXELS)
+def compute_betas(cfg, final_mask_data, noise_model, runs, durations, strategies):
+    """Compute all betas in the 19174-voxel whole-brain space. Returns dict:
+        betas['glm'][L]         -> (n_trials, WHOLE_BRAIN_NV)   asymmetric (refs=21s)
+        betas['glm_matched'][L] -> (n_trials, WHOLE_BRAIN_NV)   matched (refs=L)
+        betas['avgbold']        -> (n_trials, WHOLE_BRAIN_NV)
+        betas['sliding']        -> (n_trials, n_windows, WHOLE_BRAIN_NV)
     plus the parallel list trial_image_names (correct image per trial), kept in
-    a single consistent trial order across all strategies.
+    a single consistent trial order across all strategies. Betas are checkpoint-
+    independent; the active checkpoint's voxel mask is applied at inference time.
     """
     glm_betas = {L: [] for L in durations} if "glm" in strategies else {}
     matched_betas = {L: [] for L in durations} if "glm_matched" in strategies else {}
@@ -520,24 +557,24 @@ def compute_betas(cfg, union_mask_img, boldref_nib, runs, durations, strategies)
             trial_image_names.append(str(events_df["image_name"].iloc[trial]))
             if "avgbold" in strategies:
                 avg_betas.append(
-                    avgbold_beta_for_trial(vols4d, events_df, union_mask_img, trial)
+                    avgbold_beta_for_trial(vols4d, events_df, final_mask_data, trial)
                 )
             if "glm" in strategies:
                 for L in durations:
                     glm_betas[L].append(
-                        glm_beta_for_trial(vols4d, events_df, union_mask_img,
-                                           trial, float(L), boldref_nib)
+                        glm_beta_for_trial(vols4d, events_df, final_mask_data,
+                                           trial, float(L), noise_model)
                     )
             if "glm_matched" in strategies:
                 for L in durations:
                     matched_betas[L].append(
-                        glm_matched_beta_for_trial(vols4d, events_df, union_mask_img,
-                                                   trial, float(L), boldref_nib)
+                        glm_matched_beta_for_trial(vols4d, events_df, final_mask_data,
+                                                   trial, float(L), noise_model)
                     )
             if "sliding" in strategies:
                 sliding_betas.append(
-                    sliding_beta_for_trial(vols4d, events_df, union_mask_img,
-                                           trial, boldref_nib)
+                    sliding_beta_for_trial(vols4d, events_df, final_mask_data,
+                                           trial, noise_model)
                 )
         print(f"  run {run_num}: {n_trials} trials done", flush=True)
 
@@ -549,13 +586,18 @@ def compute_betas(cfg, union_mask_img, boldref_nib, runs, durations, strategies)
     if "avgbold" in strategies:
         out["avgbold"] = np.asarray(avg_betas)
     if "sliding" in strategies:
-        out["sliding"] = np.asarray(sliding_betas)  # (n_trials, n_windows, NUM_VOXELS)
+        out["sliding"] = np.asarray(sliding_betas)  # (n_trials, n_windows, WHOLE_BRAIN_NV)
     return out, trial_image_names
 
 
 def analyze(cfg, betas, trial_image_names, clip_img_embedder, predict_fn, device,
             durations, strategies):
-    """Turn betas into per-trial CPD + retrieval summaries for each strategy."""
+    """Turn betas into per-trial CPD + retrieval summaries for each strategy.
+
+    Betas are in the 19174-voxel whole-brain space; the active checkpoint's boolean
+    mask selects its NUM_VOXELS just before z-scoring/inference.
+    """
+    voxel_mask = load_voxel_mask(cfg)  # (19174,) bool selecting this checkpoint's voxels
     emb_cache = embed_unique_images(cfg, clip_img_embedder, trial_image_names, device)
     available = [os.path.basename(p) for p in
                  glob.glob(os.path.join(cfg["data_path"], STIM_DIR, "*.png"))]
@@ -577,7 +619,11 @@ def analyze(cfg, betas, trial_image_names, clip_img_embedder, predict_fn, device
     results = {"trial_image_names": trial_image_names, "foil_names": foil_names}
 
     def score(b):
-        """Causal z-score -> predict -> CPD/2-AFC/retrieval for a (n_trials, NUM_VOXELS) matrix."""
+        """Mask to NUM_VOXELS -> causal z-score -> predict -> CPD/2-AFC/retrieval.
+
+        ``b`` is a (n_trials, WHOLE_BRAIN_NV) whole-brain beta matrix.
+        """
+        b = np.asarray(b)[:, voxel_mask]  # (n_trials, NUM_VOXELS)
         z = causal_zscore_betas(b)
         preds = [predict_fn(torch.from_numpy(np.asarray(z[t], dtype=np.float32))
                             .reshape(1, 1, NUM_VOXELS)) for t in range(len(z))]
@@ -610,8 +656,13 @@ def analyze(cfg, betas, trial_image_names, clip_img_embedder, predict_fn, device
     return results
 
 
-def save_results(out_dir, betas, results, durations, strategies):
+def save_results(out_dir, betas_dir, betas, results, durations, strategies):
+    """Save checkpoint-independent whole-brain betas to ``betas_dir`` and the
+    checkpoint-specific CPD/2-AFC/retrieval summaries to ``out_dir``. ``trial_images.csv``
+    (the trial order, identical across checkpoints) is written to both so each is
+    self-contained for --reanalyze (betas_dir) and --replot / cross_offline (out_dir)."""
     os.makedirs(out_dir, exist_ok=True)
+    os.makedirs(betas_dir, exist_ok=True)
     # both per-duration GLM variants share the same on-disk layout, distinguished
     # by a filename prefix ("glm" asymmetric, "glm_matched" matched-length).
     for key in ("glm", "glm_matched"):
@@ -624,18 +675,19 @@ def save_results(out_dir, betas, results, durations, strategies):
             np.save(os.path.join(out_dir, f"{key}_retrieval.npy"),
                     np.asarray([results[key][L]["retrieval"] for L in durations]))
             for L in durations:
-                np.save(os.path.join(out_dir, f"{key}_betas_L{L:02d}.npy"), betas[key][L])
+                np.save(os.path.join(betas_dir, f"{key}_betas_L{L:02d}.npy"), betas[key][L])
     if "avgbold" in strategies:
         np.save(os.path.join(out_dir, "avgbold_cpd_per_trial.npy"), results["avgbold"]["cpd"])
-        np.save(os.path.join(out_dir, "avgbold_betas.npy"), betas["avgbold"])
+        np.save(os.path.join(betas_dir, "avgbold_betas.npy"), betas["avgbold"])
         with open(os.path.join(out_dir, "avgbold_summary.json"), "w") as f:
             json.dump({"twoafc": results["avgbold"]["twoafc"],
                        "retrieval": results["avgbold"]["retrieval"]}, f, indent=2)
     if "sliding" in strategies:
-        np.save(os.path.join(out_dir, "sliding_betas.npy"), betas["sliding"])
-    pd.DataFrame({"image_name": results["trial_image_names"],
-                  "foil_name": results["foil_names"]}).to_csv(
-        os.path.join(out_dir, "trial_images.csv"), index=False)
+        np.save(os.path.join(betas_dir, "sliding_betas.npy"), betas["sliding"])
+    trial_csv = pd.DataFrame({"image_name": results["trial_image_names"],
+                              "foil_name": results["foil_names"]})
+    trial_csv.to_csv(os.path.join(out_dir, "trial_images.csv"), index=False)
+    trial_csv.to_csv(os.path.join(betas_dir, "trial_images.csv"), index=False)
 
 
 def _offline_metric(out_dir, stimdur, col):
@@ -798,23 +850,23 @@ def load_cached_results(out_dir, strategies):
     return results, durations
 
 
-def load_cached_betas(out_dir, durations, strategies):
-    """Reload betas + trial image names saved by a previous full run.
+def load_cached_betas(betas_dir, durations, strategies):
+    """Reload whole-brain betas + trial image names saved by a previous full run.
 
-    Lets us re-run the downstream (z-score -> predict -> CPD/2-AFC) without
-    refitting any GLMs -- e.g. after changing the z-scoring scheme.
+    Lets us re-run the downstream (mask -> z-score -> predict -> CPD/2-AFC) without
+    refitting any GLMs -- e.g. after changing the z-scoring scheme or the checkpoint.
     """
     betas = {}
     for key in ("glm", "glm_matched"):
         if key in strategies:
-            betas[key] = {L: np.load(os.path.join(out_dir, f"{key}_betas_L{L:02d}.npy"))
+            betas[key] = {L: np.load(os.path.join(betas_dir, f"{key}_betas_L{L:02d}.npy"))
                           for L in durations}
     if "avgbold" in strategies:
-        betas["avgbold"] = np.load(os.path.join(out_dir, "avgbold_betas.npy"))
+        betas["avgbold"] = np.load(os.path.join(betas_dir, "avgbold_betas.npy"))
     if "sliding" in strategies:
-        betas["sliding"] = np.load(os.path.join(out_dir, "sliding_betas.npy"))
+        betas["sliding"] = np.load(os.path.join(betas_dir, "sliding_betas.npy"))
     trial_image_names = pd.read_csv(
-        os.path.join(out_dir, "trial_images.csv"))["image_name"].tolist()
+        os.path.join(betas_dir, "trial_images.csv"))["image_name"].tolist()
     return betas, trial_image_names
 
 
@@ -825,21 +877,31 @@ def main():
     ap.add_argument("--durations", default="all",
                     help="comma-separated durations (1-21) or 'all'")
     ap.add_argument("--strategies", default="glm,avgbold")
-    ap.add_argument("--out", default=None, help="output dir (default derivatives/cpd_ses-07)")
+    ap.add_argument("--ckpt", default="ses01", choices=list(CHECKPOINTS),
+                    help="decoder checkpoint + voxel mask (default ses01)")
+    ap.add_argument("--out", default=None,
+                    help="analysis output dir (default per-checkpoint, see CHECKPOINTS)")
+    ap.add_argument("--betas-dir", default=None,
+                    help="whole-brain (19174) beta cache dir; checkpoint-independent "
+                         "(default derivatives/cpd_ses-07/wholebrain)")
+    ap.add_argument("--noise-model", default="ar1", choices=["ar1", "ols"],
+                    help="GLM noise model (ar1 reproduces the old FirstLevelModel; ols is faster)")
     ap.add_argument("--replot", action="store_true",
                     help="regenerate plots from cached .npy without recomputing betas")
     ap.add_argument("--reanalyze", action="store_true",
-                    help="reload cached betas and re-run CPD/2-AFC + save + plot "
-                         "(no GLM refit); use after changing z-scoring/analysis")
+                    help="reload cached whole-brain betas and re-run CPD/2-AFC + save + plot "
+                         "(no GLM refit); use after changing z-scoring/analysis/checkpoint")
     args = ap.parse_args()
 
     cfg = load_config()
+    out_dir = apply_checkpoint(args.ckpt, cfg["derivatives_path"])
+    out_dir = args.out or out_dir
+    betas_dir = args.betas_dir or os.path.join(cfg["derivatives_path"], "cpd_ses-07", "wholebrain")
     runs = list(range(1, N_RUNS + 1)) if args.runs == "all" else \
         [int(x) for x in args.runs.split(",")]
     durations = DURATIONS if args.durations == "all" else \
         [int(x) for x in args.durations.split(",")]
     strategies = [s.strip() for s in args.strategies.split(",")]
-    out_dir = args.out or os.path.join(cfg["derivatives_path"], "cpd_ses-07")
 
     if args.replot:
         results, durations = load_cached_results(out_dir, strategies)
@@ -850,38 +912,37 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     if args.reanalyze:
-        print(f"reanalyze (causal z-score) device={device} durations={durations} "
-              f"strategies={strategies}")
-        betas, trial_image_names = load_cached_betas(out_dir, durations, strategies)
+        print(f"reanalyze ckpt={args.ckpt} device={device} durations={durations} "
+              f"strategies={strategies} betas_dir={betas_dir}")
+        betas, trial_image_names = load_cached_betas(betas_dir, durations, strategies)
         model = build_model(cfg, device)
         clip_img_embedder = load_clip_embedder(cfg, device)
         predict_fn = make_predict_fn(model, device)
         results = analyze(cfg, betas, trial_image_names, clip_img_embedder,
                           predict_fn, device, durations, strategies)
-        save_results(out_dir, betas, results, durations, strategies)
+        save_results(out_dir, betas_dir, betas, results, durations, strategies)
         plot_results(out_dir, results, durations, strategies)
         print(f"reanalyzed -> {out_dir}")
         return
 
-    print(f"device={device} runs={runs} durations={durations} strategies={strategies}")
+    print(f"device={device} ckpt={args.ckpt} runs={runs} durations={durations} "
+          f"strategies={strategies} noise_model={args.noise_model}")
 
-    import nibabel as nib
-    boldref_nib = nib.load(os.path.join(cfg["data_path"], BOLDREF_NAME))
-    union_mask_img = build_union_mask_img(cfg)
+    final_mask_data = load_final_mask_data(cfg)
     model = build_model(cfg, device)
     clip_img_embedder = load_clip_embedder(cfg, device)
     predict_fn = make_predict_fn(model, device)
 
-    print("computing betas...")
+    print("computing whole-brain betas...")
     betas, trial_image_names = compute_betas(
-        cfg, union_mask_img, boldref_nib, runs, durations, strategies)
+        cfg, final_mask_data, args.noise_model, runs, durations, strategies)
     print(f"computed betas for {len(trial_image_names)} trials")
 
     print("analyzing (CPD + retrieval)...")
     results = analyze(cfg, betas, trial_image_names, clip_img_embedder,
                       predict_fn, device, durations, strategies)
 
-    save_results(out_dir, betas, results, durations, strategies)
+    save_results(out_dir, betas_dir, betas, results, durations, strategies)
     plot_results(out_dir, results, durations, strategies)
     print(f"done -> {out_dir}")
 
