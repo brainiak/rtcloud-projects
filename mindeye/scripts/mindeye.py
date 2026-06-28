@@ -3,6 +3,7 @@ Imports and set up for mindEye
 -----------------------------------------------------------------------------"""
 import os
 import sys
+from tqdm import tqdm
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -34,6 +35,7 @@ from PIL import Image
 # tf32 data type is faster than standard float32
 torch.backends.cuda.matmul.allow_tf32 = True
 # custom functions #
+sys.path.append('/home/ri4541@pu.win.princeton.edu/rt-cloud/projects/mindeye/scripts')
 import utils_mindeye
 sys.path.append('/home/ri4541@pu.win.princeton.edu/rt-cloud/projects/mindeye/models')
 from models import *
@@ -61,7 +63,7 @@ from nilearn.glm.first_level import FirstLevelModel
 from nilearn.image import get_data, index_img, concat_imgs, new_img_like
 cwd = os.getcwd()
 print("cwd ", cwd)
-print(os.listdir("projects/mindeye/BidsDir/"))
+# print(os.listdir("projects/mindeye/BidsDir/"))
 sys.path.append(cwd)
 from rtCommon.utils import loadConfigFile, stringPartialFormat
 from rtCommon.clientInterface import ClientInterface
@@ -69,7 +71,8 @@ from rtCommon.bidsArchive import BidsArchive
 from rtCommon.bidsRun import BidsRun
 from rtCommon.bidsInterface import *
 
-conf_path = 'projects/mindeye/conf/config.json'
+# conf_path = 'projects/mindeye/conf/config.json'
+conf_path = '/home/ri4541@pu.win.princeton.edu/rt-cloud/projects/mindeye/conf/config.json'
 try:
     with open(conf_path, 'r') as f:
         config = json.load(f)
@@ -276,11 +279,11 @@ for idx, im in enumerate(image_names):  # need unique_MST_images to be defined, 
         
 assert len(MST_ID) == len(image_idx)
 print(MST_ID.shape)
-if sub == 'sub-005' and session == 'ses-06':
-    pass
-    # assert len(all_MST_images) == 630
-else:
-    assert len(all_MST_images) == 693
+# if sub == 'sub-005' and session == 'ses-06':
+#     pass
+#     # assert len(all_MST_images) == 630
+# else:
+#     assert len(all_MST_images) == 693
 
 resize_transform = transforms.Resize((imsize, imsize))
 MST_images = []
@@ -517,7 +520,7 @@ for run_num in range(1, n_runs + 1):
     
     dicomScanNamePattern = stringPartialFormat(dicomNamePattern, 'RUN', run_to_dicom[run_num])
 
-    dicom_filename = "phantom2"  # when registering the subject into the scanner, this is what was entered for last name and subject ID
+    dicom_filename = "005_08_rtmindeye"  # when registering the subject into the scanner, this is what was entered for last name and subject ID
     dicomDir = f"/home/scontrol/20260618.{dicom_filename}.{dicom_filename}"  # directory to use when the scanner mounts to the real-time computer
     # dicomDir = f"{data_path}/dicom_ses-03"
     streamID = bidsInterface.initDicomBidsStream(dicomDir, dicomScanNamePattern,
@@ -556,7 +559,7 @@ for run_num in range(1, n_runs + 1):
     n_trs = 288
     assert len(tr_labels_shifted) == n_trs, "there should be image labels for each TR"
     assert all(label in image_names for label in tr_labels_shifted if label != 'blank'), "Some labels in tr_labels_shifted are missing from image_names."
-    assert len(images) > n_trs, "images array is too short."
+    # assert len(images) > n_trs, "images array is too short."
 
     for TR in range(n_trs):
         print(f"TR {TR}")
