@@ -22,7 +22,9 @@ import torch.nn as nn
 from torchvision import transforms
 from accelerate import Accelerator, DeepSpeedPlugin
 # SDXL unCLIP requires code from https://github.com/Stability-AI/generative-models/tree/main
-sys.path.append('projects/mindeye/generative_models/')
+sys.path.append('/home/ri4541@pu.win.princeton.edu/rt-cloud/projects/mindeye/generative_models')
+print(os.getcwd())
+print(sys.path)
 import sgm
 from generative_models.sgm.modules.encoders.modules import FrozenOpenCLIPImageEmbedder, FrozenOpenCLIPEmbedder2
 from generative_models.sgm.models.diffusion import DiffusionEngine
@@ -33,7 +35,9 @@ from PIL import Image
 torch.backends.cuda.matmul.allow_tf32 = True
 # custom functions #
 import utils_mindeye
+sys.path.append('/home/ri4541@pu.win.princeton.edu/rt-cloud/projects/mindeye/models')
 from models import *
+from cpd_analysis import make_predict_fn, foil_path_for
 import pandas as pd
 import ants
 import nilearn
@@ -41,8 +45,6 @@ from nilearn.plotting import plot_design_matrix
 import pickle
 from collections import defaultdict
 import imageio.v2 as imageio
-import zlib
-import base64
 from copy import deepcopy
 
 """-----------------------------------------------------------------------------
@@ -114,106 +116,15 @@ clip_img_embedder.to(device)
 clip_seq_dim = 256
 clip_emb_dim = 1664
 
-
-class MindEyeModule(nn.Module):
-    def __init__(self):
-        super(MindEyeModule, self).__init__()
-    def forward(self, x):
-        return x
-        
-model = MindEyeModule()
-
-class RidgeRegression(torch.nn.Module):
-    # make sure to add weight_decay when initializing optimizer
-    def __init__(self, input_sizes, out_features, seq_len): 
-        super(RidgeRegression, self).__init__()
-        self.out_features = out_features
-        self.linears = torch.nn.ModuleList([
-                torch.nn.Linear(input_size, out_features) for input_size in input_sizes
-            ])
-    def forward(self, x, subj_idx):
-        out = torch.cat([self.linears[subj_idx](x[:,seq]).unsqueeze(1) for seq in range(seq_len)], dim=1)
-        return out
 num_voxels = 8627
-model.ridge = RidgeRegression([num_voxels], out_features=hidden_dim, seq_len=seq_len)
-
-class BrainNetwork(nn.Module):
-    def __init__(self, h=4096, in_dim=15724, out_dim=768, seq_len=2, n_blocks=n_blocks, drop=.15, 
-                clip_size=768):
-        super().__init__()
-        self.seq_len = seq_len
-        self.h = h
-        self.clip_size = clip_size
-        
-        self.mixer_blocks1 = nn.ModuleList([
-            self.mixer_block1(h, drop) for _ in range(n_blocks)
-        ])
-        self.mixer_blocks2 = nn.ModuleList([
-            self.mixer_block2(seq_len, drop) for _ in range(n_blocks)
-        ])
-        
-        # Output linear layer
-        self.backbone_linear = nn.Linear(h * seq_len, out_dim, bias=True) 
-        self.clip_proj = self.projector(clip_size, clip_size, h=clip_size)
-    
-            
-    def projector(self, in_dim, out_dim, h=2048):
-        return nn.Sequential(
-            nn.LayerNorm(in_dim),
-            nn.GELU(),
-            nn.Linear(in_dim, h),
-            nn.LayerNorm(h),
-            nn.GELU(),
-            nn.Linear(h, h),
-            nn.LayerNorm(h),
-            nn.GELU(),
-            nn.Linear(h, out_dim)
-        )
-    
-    def mlp(self, in_dim, out_dim, drop):
-        return nn.Sequential(
-            nn.Linear(in_dim, out_dim),
-            nn.GELU(),
-            nn.Dropout(drop),
-            nn.Linear(out_dim, out_dim),
-        )
-    
-    def mixer_block1(self, h, drop):
-        return nn.Sequential(
-            nn.LayerNorm(h),
-            self.mlp(h, h, drop),  # Token mixing
-        )
-
-    def mixer_block2(self, seq_len, drop):
-        return nn.Sequential(
-            nn.LayerNorm(seq_len),
-            self.mlp(seq_len, seq_len, drop)  # Channel mixing
-        )
-        
-    def forward(self, x):
-        # make empty tensors
-        c,b,t = torch.Tensor([0.]), torch.Tensor([[0.],[0.]]), torch.Tensor([0.])
-        
-        # Mixer blocks
-        residual1 = x
-        residual2 = x.permute(0,2,1)
-        for block1, block2 in zip(self.mixer_blocks1,self.mixer_blocks2):
-            x = block1(x) + residual1
-            residual1 = x
-            x = x.permute(0,2,1)
-            
-            x = block2(x) + residual2
-            residual2 = x
-            x = x.permute(0,2,1)
-            
-        x = x.reshape(x.size(0), -1)
-        backbone = self.backbone_linear(x).reshape(len(x), -1, self.clip_size)
-        c = self.clip_proj(backbone)
-        
-        return backbone, c, b
-
-model.backbone = BrainNetwork(h=hidden_dim, in_dim=hidden_dim, seq_len=seq_len, 
-                        clip_size=clip_emb_dim, out_dim=clip_emb_dim*clip_seq_dim) 
+model = utils_mindeye.MindEyeModule(
+    num_voxels=num_voxels,
+    hidden_dim=hidden_dim,
+    seq_len=seq_len,
+    clip_emb_dim=clip_emb_dim,
+    clip_seq_dim=clip_seq_dim,
+    n_blocks=n_blocks,
+)
 utils_mindeye.count_params(model.ridge)
 utils_mindeye.count_params(model.backbone)
 utils_mindeye.count_params(model)
@@ -225,20 +136,12 @@ dim_head = 52
 heads = clip_emb_dim//52 # heads * dim_head = clip_emb_dim
 timesteps = 100
 
-prior_network = PriorNetwork(
-        dim=out_dim,
-        depth=depth,
-        dim_head=dim_head,
-        heads=heads,
-        causal=False,
-        num_tokens = clip_seq_dim,
-        learned_query_mode="pos_emb"
-    )
-
-model.diffusion_prior = BrainDiffusionPrior(
-    net=prior_network,
-    image_embed_dim=out_dim,
-    condition_on_text_encodings=False,
+model.build_diffusion_prior(
+    clip_emb_dim=clip_emb_dim,
+    clip_seq_dim=clip_seq_dim,
+    depth=depth,
+    dim_head=dim_head,
+    heads=heads,
     timesteps=timesteps,
     cond_drop_prob=0.2,
     image_embed_scale=None,
@@ -289,10 +192,10 @@ out = diffusion_engine.conditioner(batch)
 vector_suffix = out["vector"].to(device)
 
 sub = "sub-005"
-session = "ses-06"
+session = "ses-08"
 task = 'C'  # 'study' or 'A'; used to search for functional run in bids format
 func_task_name = 'C'  # 'study' or 'A'; used to search for functional run in bids format
-n_runs = 11
+n_runs = 6
 
 ses_list = [session]
 design_ses_list = [session]
@@ -401,6 +304,8 @@ MST_images = np.array(MST_images)
 print("len MST_images", len(MST_images))
 if sub == 'sub-005' and session == 'ses-06':
     pass
+elif sub == 'sub-005' and session == 'ses-08':
+    assert len(MST_images[MST_images==True]) == 72
 else:
     assert len(MST_images[MST_images==True]) == 124
 print("MST_images==True", len(MST_images[MST_images==True]))
@@ -480,6 +385,10 @@ def fast_apply_mask(target=None,mask=None):
 fmriprep_boldref_nib = nib.load(fmriprep_boldref)
 union_mask = np.load(f"{data_path}/union_mask_from_ses-01-02.npy")
 
+# apply union mask to the nsdgeneral ROI and convert to nifti
+assert mask_img.get_fdata().sum() == union_mask.shape
+union_mask_img = new_img_like(mask_img, union_mask)
+
 # apply union_mask to mask_img and return nifti object
 
 # Get the data as a boolean array
@@ -503,56 +412,6 @@ new_mask_data = new_mask_flat.reshape(mask_data.shape)
 # Create new NIfTI image
 union_mask_img = nib.Nifti1Image(new_mask_data.astype(np.uint8), affine=mask_img.affine)
 
-print("union_mask_img.shape", union_mask_img.shape)
-print("union mask num voxels", int(union_mask_img.get_fdata().sum()))
-
-def compress_and_encode_image(image_array):
-    # Convert the image array to bytes, compress, and encode
-    if image_array.dtype != np.uint8:
-        image_array = image_array.astype(np.uint8)
-    compressed_data = zlib.compress(image_array.tobytes())
-    encoded_data = base64.b64encode(compressed_data).decode('utf-8')
-    return encoded_data
-
-
-def do_reconstructions(betas_tt):
-    """
-    takes in the beta map for a stimulus trial in torch tensor format (tt)
-
-    returns reconstructions and clipvoxels for retrievals
-    """
-    print('starting reconstruction!')
-    model.to(device)
-    model.eval().requires_grad_(False)
-    clipvoxelsTR = None
-    reconsTR = None
-    num_samples_per_image = 1
-    with torch.no_grad(), torch.amp.autocast('cuda', dtype=torch.float16):
-        voxel = betas_tt
-        voxel = voxel.to(device)
-        voxel_ridge = model.ridge(voxel[:,[0]],0) # 0th index of subj_list
-        backbone0, clip_voxels0, blurry_image_enc0 = model.backbone(voxel_ridge)
-        clip_voxels = clip_voxels0
-        backbone = backbone0
-        blurry_image_enc = blurry_image_enc0[0]
-        clipvoxelsTR = clip_voxels.cpu()
-        prior_out = model.diffusion_prior.p_sample_loop(backbone.shape, 
-                        text_cond = dict(text_embed = backbone), 
-                        cond_scale = 1., timesteps = 20)  
-        for i in range(len(voxel)):
-            samples = utils_mindeye.unclip_recon(prior_out[[i]],
-                            diffusion_engine,
-                            vector_suffix,
-                            num_samples=num_samples_per_image)
-            if reconsTR is None:
-                reconsTR = samples.cpu()
-            else:
-                reconsTR = torch.vstack((reconsTR, samples.cpu()))
-
-            reconsTR = transforms.Resize((imsize, imsize), antialias=True)(reconsTR)
-
-        return reconsTR, clipvoxelsTR
-    
 def batchwise_cosine_similarity(Z,B):
     Z = Z.flatten(1)
     B = B.flatten(1).T
@@ -560,46 +419,6 @@ def batchwise_cosine_similarity(Z,B):
     B_norm = torch.linalg.norm(B, dim=0, keepdim=True)  # Size (1, b).
     cosine_similarity = ((Z @ B) / (Z_norm @ B_norm)).T
     return cosine_similarity
-
-def get_top_retrievals(clipvoxel, all_images, total_retrievals=1):
-    '''
-    clipvoxel: output from do_recons that contains that information needed for retrievals
-    all_images: all ground truth actually seen images by the participant in day 2 run 1
-
-    outputs the top retrievals
-    '''
-    values_dict = {}
-    with torch.amp.autocast('cuda', dtype=torch.float16):
-        emb = clip_img_embedder(torch.reshape(all_images,(all_images.shape[0], 3, imsize, imsize)).to(device)).float() # CLIP-Image
-        emb = emb.cpu()
-        emb_ = clipvoxel # CLIP-Brain
-        emb = emb.reshape(len(emb),-1)
-        emb_ = np.reshape(emb_, (1, 425984))
-        emb = nn.functional.normalize(emb,dim=-1)
-        emb_ = nn.functional.normalize(emb_,dim=-1)
-        emb_ = emb_.float()
-        fwd_sim = batchwise_cosine_similarity(emb_,emb)  # brain, clip
-        print("Given Brain embedding, find correct Image embedding")
-    fwd_sim = np.array(fwd_sim.cpu())
-    which = np.flip(np.argsort(fwd_sim, axis = 0))
-    
-    for attempt in range(total_retrievals):
-        image_tensor = all_images[which[attempt].copy()]  # [C, H, W]
-        if image_tensor.dim() == 4 and image_tensor.shape[0] == 1:
-            image_tensor = image_tensor.squeeze(0)  # Remove extra batch dim
-        resized = transforms.Resize((imsize, imsize), antialias=True)(image_tensor.unsqueeze(0))  # [1, C, H, W]
-        # squeeze(0) goes from [1, 3, H, W] -> [3, H, W]
-        # permute(1, 2, 0) undoes the permute(2, 0, 1) from loading in the image
-        # clamp(0, 1) makes sure the values are all between 0 and 1 (prevents under/overflow due to floating point imprecision)
-        # * 255 converts from [0, 1] (floating point) to [0, 255] (8-bit)
-        # byte() casts to uint8
-        # numpy() casts from torch tensor to numpy array
-        # print(f"resized shape before squeeze: {resized.shape}")
-        image_array = (resized.squeeze(0).permute(1, 2, 0).clamp(0, 1) * 255).byte().numpy()
-        encoded_image = compress_and_encode_image(image_array)
-        values_dict[f"attempt{(attempt+1)}"] = encoded_image
-
-    return values_dict
 
 def convert_image_array_to_PIL(image_array):
     if image_array.ndim == 4:
@@ -619,7 +438,52 @@ def convert_image_array_to_PIL(image_array):
 plot_images=False
 save_individual_images=False
 save_all_recons=False
-evaluate_session=False
+do_cpd=True            # compute CPD scalar (pre-computed embeddings)
+do_retrieval=False     # top-5 retrieval images
+run_recons=False       # diffusion reconstruction (~4.5s/trial)
+
+# --- real-time setup: build the decoder predict fn, pre-compute CLIP embeddings, and
+# --- validate everything the TR loop needs UP FRONT so it can never crash mid-run.
+predict_fn = make_predict_fn(model, device)  # betas -> predicted CLIP clip_voxels (ridge+backbone)
+
+# every MST label the loop will read across all runs (authoritative source = tr_labels)
+all_mst_labels = sorted({lab for trl in ndscore_tr_labels
+                         for lab in trl["tr_label_shifted"].astype(str) if "MST_pairs" in lab})
+foil_name_for = {lab: os.path.relpath(foil_path_for(os.path.join(data_path, lab)), data_path)
+                 for lab in all_mst_labels}  # raises now if any foil is missing/ambiguous
+
+clip_embeds = {}
+if do_cpd:
+    needed = sorted(set(all_mst_labels) | set(foil_name_for.values()))
+    for name in needed:
+        assert os.path.exists(os.path.join(data_path, name)), f"missing stimulus on disk: {name}"
+    with torch.no_grad(), torch.amp.autocast('cuda', dtype=torch.float16):
+        for name in needed:
+            im = imageio.imread(os.path.join(data_path, name))
+            im = resize_transform(torch.Tensor(im / 255).permute(2, 0, 1).unsqueeze(0)).to(device)
+            clip_embeds[name] = clip_img_embedder(im).float().cpu()
+    print(f"pre-computed {len(clip_embeds)} CLIP embeddings (MST stimuli + foils)")
+
+# ---- pre-flight assertions: fail before the real-time loop, never during it ----
+assert do_cpd or do_retrieval or run_recons, "enable at least one of do_cpd/do_retrieval/run_recons"
+# trial-N naming assumes every stimulus image is an MST pairmate (dense 1..N index); fail
+# loudly here if a future session mixes in non-MST stimuli so the indexing isn't silently wrong
+non_mst_labels = sorted({lab for trl in ndscore_tr_labels
+                         for lab in trl["tr_label_shifted"].astype(str)
+                         if lab not in ('blank', 'blank.jpg') and "MST_pairs" not in lab})
+assert not non_mst_labels, \
+    f"non-MST stimulus labels present; trial-N indexing assumes MST-only stimuli: {non_mst_labels}"
+# every MST trial resolves its ground-truth image via vox_image_names, regardless of flags
+for lab in all_mst_labels:
+    assert lab in vox_image_names, f"MST label not in vox_image_names (no ground-truth row): {lab}"
+if do_cpd:
+    for lab in all_mst_labels:
+        assert lab in clip_embeds and foil_name_for[lab] in clip_embeds, \
+            f"do_cpd: no pre-computed embedding for {lab} or its foil"
+if do_retrieval:
+    assert len(MST_idx) > 0, "do_retrieval: empty MST retrieval pool (MST_idx)"
+if run_recons:
+    assert model.diffusion_prior is not None, "run_recons: diffusion_prior not initialized"
 
 mc_dir = f"{derivatives_path}/motion_corrected"
 mc_resampled_dir = f"{derivatives_path}/motion_corrected_resampled"
@@ -636,6 +500,10 @@ assert np.all(fmriprep_boldref_nib.affine == union_mask_img.affine)
 all_betas = []
 shown_filenames = dict()
 
+# session-level accumulators (in-memory) for the always-on end-of-session evaluation
+session_cpd, session_clipvoxels, session_ground_truth = [], [], []
+session_recons, session_retrieved = [], []
+
 # go through each run
 for run_num in range(1, n_runs + 1):
     print(f"Start of real-time session run {run_num}!\n")
@@ -649,8 +517,8 @@ for run_num in range(1, n_runs + 1):
     
     dicomScanNamePattern = stringPartialFormat(dicomNamePattern, 'RUN', run_to_dicom[run_num])
 
-    dicom_filename = "005_ses06_rtmindeye"  # when registering the subject into the scanner, this is what was entered for last name and subject ID
-    dicomDir = f"/home/scontrol/20250729.{dicom_filename}.{dicom_filename}"  # directory to use when the scanner mounts to the real-time computer
+    dicom_filename = "phantom2"  # when registering the subject into the scanner, this is what was entered for last name and subject ID
+    dicomDir = f"/home/scontrol/20260618.{dicom_filename}.{dicom_filename}"  # directory to use when the scanner mounts to the real-time computer
     # dicomDir = f"{data_path}/dicom_ses-03"
     streamID = bidsInterface.initDicomBidsStream(dicomDir, dicomScanNamePattern,
                                                300000, anonymize=False,
@@ -662,8 +530,8 @@ for run_num in range(1, n_runs + 1):
     mc_params = []
     imgs = []
     events_df = ndscore_events[run_num - 1]
-    tr_labels_hrf = ndscore_tr_labels[run_num - 1]["tr_label_hrf"].tolist()
-    events_df = events_df[events_df['image_name'] != 'blank.jpg']  # must drop blank.jpg after tr_labels_hrf is defined to keep indexing consistent
+    tr_labels_shifted = ndscore_tr_labels[run_num - 1]["tr_label_shifted"].tolist()
+    events_df = events_df[events_df['image_name'] != 'blank.jpg']  # must drop blank.jpg after tr_labels_shifted is defined to keep indexing consistent
     beta_maps_list = []
     all_trial_names_list = []
     all_images = None
@@ -677,19 +545,20 @@ for run_num in range(1, n_runs + 1):
     all_clipvoxels_save = []
     all_ground_truth_save = []
     all_retrieved_save = []
+    all_cpd_save = []
 
     stimulus_trial_counter = 0
     # Counter for MST_pairs trials and evenly spaced recon points
-    mst_trial_counter = 0
-    mst_total = 63  # total MST_pairs trials in a run (adjust if needed)
-    mst_recon_points = np.linspace(5, mst_total, 7, dtype=int).tolist()
+    # mst_trial_counter = 0
+    # mst_total = 63  # total MST_pairs trials in a run (adjust if needed)
+    # mst_recon_points = np.linspace(5, mst_total, 7, dtype=int).tolist()
     T1_brain = f"{data_path}/{sub}_desc-preproc_T1w_brain.nii.gz"
-    n_trs = 192
-    assert len(tr_labels_hrf) == n_trs, "there should be image labels for each TR"
-    assert all(label in image_names for label in tr_labels_hrf if label != 'blank'), "Some labels in tr_labels_hrf are missing from image_names."
+    n_trs = 288
+    assert len(tr_labels_shifted) == n_trs, "there should be image labels for each TR"
+    assert all(label in image_names for label in tr_labels_shifted if label != 'blank'), "Some labels in tr_labels_shifted are missing from image_names."
     assert len(images) > n_trs, "images array is too short."
 
-    for TR in range(n_trs-1):
+    for TR in range(n_trs):
         print(f"TR {TR}")
         incremental_bids_image = bidsInterface.getIncremental(streamID,volIdx=TR+1,
                                         timeout=999999,demoStep=0)
@@ -697,7 +566,7 @@ for run_num in range(1, n_runs + 1):
         curr_nifti = f'{tmpPath}/temp.nii'
         nib.save(image_data, curr_nifti)
 
-        current_label = tr_labels_hrf[TR]
+        current_label = tr_labels_shifted[TR]
         print(current_label)
         
         if TR == 0 and run_num == 1:
@@ -764,119 +633,144 @@ for run_num in range(1, n_runs + 1):
                 is_repeat = True
                 print(f"The following image is a repeat!\n{shown_filenames[current_label]}")
 
-            if "MST_pairs" in current_label and run_num >= 2:
-                mst_trial_counter += 1
-                if mst_trial_counter in mst_recon_points:
-                    correct_image_index = np.where(current_label == vox_image_names)[0][0]  # using the first occurrence based on image name, assumes that repeated images are identical (which they should be)
-                    z_mean = np.mean(np.array(all_betas), axis=0)
-                    z_std = np.std(np.array(all_betas), axis=0)
-                    if is_repeat:
-                        beta_repeat_idxs = shown_filenames[current_label]
-                        assert len(beta_repeat_idxs) > 1  # this image has been shown more than once
-                        betas_repeats = []
-                        for b in beta_repeat_idxs:
-                            print(f"Averaging over {len(beta_repeat_idxs)} repeats")
-                            # re-z-score the older betas in addition to the newest beta since we have more data to z-score with
-                            tmp = ((np.array(all_betas) - z_mean) / (z_std + 1e-6))[b-1]
-                            betas_repeats.append(tmp)
-                        betas = np.mean(np.array(betas_repeats), axis=0)  # average beta patterns over all available repeats
-                    else:
-                        betas = ((np.array(all_betas) - z_mean) / (z_std + 1e-6))[-1]  # use only the beta pattern from the most recent image
-                    betas = betas[np.newaxis, np.newaxis, :]
-                    betas_tt = torch.Tensor(betas).to("cpu")
-                    reconsTR, clipvoxelsTR = do_reconstructions(betas_tt)
-                    if clipvoxelsTR is None:
-                        with torch.no_grad(), torch.cuda.amp.autocast(dtype=torch.float16):
-                            voxel = betas_tt
-                            voxel = voxel.to(device)
-                            assert voxel.shape[1] == 1
-                            voxel_ridge = model.ridge(voxel[:,[-1]],0) # 0th index of subj_list
-                            backbone0, clip_voxels0, blurry_image_enc0 = model.backbone(voxel_ridge)
-                            clip_voxels = clip_voxels0
-                            backbone = backbone0
-                            blurry_image_enc = blurry_image_enc0[0]
-                            clipvoxelsTR = clip_voxels.cpu()
+            if "MST_pairs" in current_label:  # and run_num >= 2:
+                # mst_trial_counter += 1
+                # if mst_trial_counter in mst_recon_points:
+                correct_image_index = np.where(current_label == vox_image_names)[0][0]  # using the first occurrence based on image name, assumes that repeated images are identical (which they should be)
+                z_mean = np.mean(np.array(all_betas), axis=0)
+                z_std = np.std(np.array(all_betas), axis=0)
+                # if is_repeat:
+                #     beta_repeat_idxs = shown_filenames[current_label]
+                #     assert len(beta_repeat_idxs) > 1  # this image has been shown more than once
+                #     betas_repeats = []
+                #     for b in beta_repeat_idxs:
+                #         print(f"Averaging over {len(beta_repeat_idxs)} repeats")
+                #         # re-z-score the older betas in addition to the newest beta since we have more data to z-score with
+                #         tmp = ((np.array(all_betas) - z_mean) / (z_std + 1e-6))[b-1]
+                #         betas_repeats.append(tmp)
+                #     betas = np.mean(np.array(betas_repeats), axis=0)  # average beta patterns over all available repeats
+                # else:
+                betas = ((np.array(all_betas) - z_mean) / (z_std + 1e-6))[-1]  # use only the beta pattern from the most recent image
+                betas = betas[np.newaxis, np.newaxis, :]
+                betas_tt = torch.Tensor(betas).to("cpu")
+                # predicted CLIP embedding (ridge+backbone only), decoupled from diffusion recon
+                clipvoxelsTR = predict_fn(betas_tt)
+                if run_recons:
+                    reconsTR, _ = utils_mindeye.do_reconstructions(
+                        model,
+                        betas_tt,
+                        diffusion_engine,
+                        vector_suffix,
+                        imsize,
+                        device,
+                    )
 
-                    values_dict = get_top_retrievals(clipvoxelsTR, all_images=images[MST_idx], total_retrievals=5)
-                    values_dict["recons"] = compress_and_encode_image((reconsTR.squeeze(0).permute(1, 2, 0).clamp(0, 1) * 255).byte().numpy())
+                # assemble the result dict from whichever options are enabled
+                values_dict = {}
+                cpd_val = None
+                if do_cpd:
+                    foil_label = foil_name_for[current_label]
+                    cpd_val = utils_mindeye.cpd_from_embeddings(
+                        pred=clipvoxelsTR,
+                        correct=clip_embeds[current_label],
+                        foil=clip_embeds[foil_label],
+                    )
+                    values_dict["cpd"] = cpd_val
+                if do_retrieval:
+                    values_dict.update(utils_mindeye.do_retrievals(
+                        clip_img_embedder,
+                        clipvoxelsTR,
+                        all_images=images[MST_idx],
+                        imsize=imsize,
+                        device=device,
+                        total_retrievals=5,
+                    ))
+                if run_recons:
+                    values_dict["recons"] = utils_mindeye.compress_and_encode_image((reconsTR.squeeze(0).permute(1, 2, 0).clamp(0, 1) * 255).byte().numpy())
                     reconsTR = reconsTR.half().numpy()
 
-                    resized = transforms.Resize((imsize, imsize), antialias=True)(images[correct_image_index])
-                    image_array = (resized.squeeze(0).permute(1, 2, 0).clamp(0, 1) * 255).byte().numpy()
-                    encoded_image = compress_and_encode_image(image_array)
-                    values_dict["ground_truth"] = encoded_image
+                resized = transforms.Resize((imsize, imsize), antialias=True)(images[correct_image_index])
+                encoded_image = utils_mindeye.compress_and_encode_image(
+                    (resized.squeeze(0).permute(1, 2, 0).clamp(0, 1) * 255).byte().numpy())
+                values_dict["ground_truth"] = encoded_image
 
-                    # subjInterface.setResultDict allows us to send to the analysis listener immediately
-                    subjInterface.setResultDict(name=f'run{run_num}_TR{TR}',
-                                                values=values_dict)
+                # subjInterface.setResultDict allows us to send to the analysis listener immediately
+                # name by session-wide image index, 1-indexed (all_betas was just appended for this trial)
+                subjInterface.setResultDict(name=f'trial-{len(all_betas)}',
+                                            values=values_dict)
 
+                # recon image (only when reconstruction was run)
+                if run_recons:
                     image_array = reconsTR[0]
-                    # If the image has 3 channels (RGB), you need to reorder the dimensions
+                    # If the image has 3 channels (RGB), reorder to (H, W, 3)
                     if image_array.ndim == 3 and image_array.shape[0] == 3:
-                        image_array = np.transpose(image_array, (1, 2, 0))  # Change shape to (height, width, 3)
+                        image_array = np.transpose(image_array, (1, 2, 0))
 
-                    # Display the image
-                    if plot_images:
-                        # plot original and reconstructed images
-                        plt.figure(figsize=(10, 5))
-                        plt.subplot(1, 2, 1)
-                        plt.title("Original Image")
-                        plt.imshow(images[correct_image_index].half().numpy().transpose(1, 2, 0), cmap='gray')
-                        plt.axis('off')
-                        plt.subplot(1, 2, 2)
+                # Display the image
+                if plot_images:
+                    n_panels = 1 + (1 if run_recons else 0) + (5 if do_retrieval else 0)
+                    col = 1
+                    plt.figure(figsize=(2.5 * n_panels, 5))
+                    plt.subplot(1, n_panels, col); col += 1
+                    plt.title("Original Image")
+                    plt.imshow(images[correct_image_index].half().numpy().transpose(1, 2, 0), cmap='gray')
+                    plt.axis('off')
+                    if run_recons:
+                        plt.subplot(1, n_panels, col); col += 1
                         plt.title("Reconstructed Image")
                         plt.imshow(image_array, cmap='gray' if image_array.ndim == 2 else None)
                         plt.axis('off')
-                        plt.show()
-
-                        # plot original with top 5 retrievals
-                        plt.figure(figsize=(10, 5))
-                        plt.subplot(1, 6, 1)
-                        plt.title("Original Image")
-                        plt.imshow(images[correct_image_index].half().numpy().transpose(1, 2, 0), cmap='gray')
-                        plt.axis('off')
+                    if do_retrieval:
                         for i in range(5):
-                            plt.subplot(1, 6, i+2)
+                            plt.subplot(1, n_panels, col); col += 1
                             plt.title(f"Retrieval {i+1}")
                             plt.imshow(np.array(values_dict[f"attempt{i+1}"][0]).transpose(1, 2, 0), cmap='gray')
                             plt.axis('off')
-                        plt.show()
+                    plt.show()
 
-                    # save reconstructed image, retrieved images, clip_voxels, and ground truth image
-                    if save_individual_images:
-                        # save the reconstructed image
+                # save reconstructed/retrieved images, clip_voxels, and ground truth image
+                if save_individual_images:
+                    if run_recons:
                         convert_image_array_to_PIL(image_array).save(os.path.join(save_path, "individual_images", f"run{run_num}_TR{TR}_reconstructed.png"))
-                        # save the retrieved images
+                    if do_retrieval:
                         for key, value in values_dict.items():
-                            if key not in ('ground_truth', 'recons'):
+                            if key.startswith("attempt"):
                                 convert_image_array_to_PIL(np.array(value)).save(os.path.join(save_path, "individual_images", f"run{run_num}_TR{TR}_retrieved_{key}.png"))
-                        # save the clip_voxels
-                        np.save(os.path.join(save_path, "individual_images", f"run{run_num}_TR{TR}_clip_voxels.npy"), clipvoxelsTR)
-                        # save the ground truth image
-                        convert_image_array_to_PIL(images[correct_image_index].half().numpy()).save(os.path.join(save_path, "individual_images", f"run{run_num}_TR{TR}_ground_truth.png"))
+                    # save the clip_voxels
+                    np.save(os.path.join(save_path, "individual_images", f"run{run_num}_TR{TR}_clip_voxels.npy"), clipvoxelsTR)
+                    # save the ground truth image
+                    convert_image_array_to_PIL(images[correct_image_index].half().numpy()).save(os.path.join(save_path, "individual_images", f"run{run_num}_TR{TR}_ground_truth.png"))
+
+                # accumulate per-run results (only what each enabled option produced)
+                if do_cpd:
+                    all_cpd_save.append(cpd_val)
+                if run_recons:
                     all_recons_save.append(image_array)
-                    all_clipvoxels_save.append(clipvoxelsTR)
-                    all_ground_truth_save.append(images[correct_image_index].half().numpy())
-                    all_retrieved_save.append([np.array(value) for key, value in values_dict.items() if (not ('ground_truth' in key))])
-                else:
-                    subjInterface.setResultDict(name=f'run{run_num}_TR{TR}',
-                        values={'pass': "pass"})
+                if do_retrieval:
+                    all_retrieved_save.append([np.array(value) for key, value in values_dict.items() if key.startswith("attempt")])
+                all_clipvoxels_save.append(clipvoxelsTR)
+                all_ground_truth_save.append(images[correct_image_index].half().numpy())
+                # else:
+                #     subjInterface.setResultDict(name=f'run{run_num}_TR{TR}',
+                #         values={'pass': "pass"})
 
             else:
-                subjInterface.setResultDict(name=f'run{run_num}_TR{TR}',
-                    values={'pass': "pass"})
+                pass
+                # subjInterface.setResultDict(name=f'run{run_num}_TR{TR}',
+                #     values={'pass': "pass"})
             
             stimulus_trial_counter += 1
         elif current_label == 'blank.jpg':
-            subjInterface.setResultDict(name=f'run{run_num}_TR{TR}',
-                values={'pass': "pass"})
+            pass
+            # subjInterface.setResultDict(name=f'run{run_num}_TR{TR}',
+            #     values={'pass': "pass"})
             stimulus_trial_counter += 1
         else:
             assert current_label == 'blank'
             # blank TR
             # when we are not at the end of a stimulus trial, send an empty dictionary to the analysis listener with "pass"
-            subjInterface.setResultDict(name=f'run{run_num}_TR{TR}',
-                            values={'pass': "pass"})
+            # subjInterface.setResultDict(name=f'run{run_num}_TR{TR}',
+            #                 values={'pass': "pass"})
         
     print(f"==END OF RUN {run_num}!==\n")
 
@@ -888,133 +782,91 @@ for run_num in range(1, n_runs + 1):
     # save betas so far
     np.save(os.path.join(save_path, f"betas_run-{run_num:02d}.npy"), np.array(all_betas))
     print(f"==END OF RUN {run_num}!==\n")
-    # save the tensors
-    if save_all_recons:
-        all_recons_save_tensor = torch.tensor(all_recons_save).permute(0,3,1,2)
+    # always save the base data (clipvoxels + ground truth; betas are already saved above)
+    # so reconstructions / top-1 retrieval / CPD can be recomputed later regardless of flags
+    if len(all_clipvoxels_save) > 0:
         all_clipvoxels_save_tensor = torch.stack(all_clipvoxels_save, dim=0)
         all_ground_truth_save_tensor = torch.tensor(all_ground_truth_save)
-        all_retrieved_save_tensor = torch.stack([torch.tensor(np.array(item)) for item in all_retrieved_save], dim=0)
-        torch.save(all_recons_save_tensor, os.path.join(save_path, "all_recons.pt"))
         torch.save(all_clipvoxels_save_tensor, os.path.join(save_path, "all_clipvoxels.pt"))
         torch.save(all_ground_truth_save_tensor, os.path.join(save_path, "all_ground_truth.pt"))
-        torch.save(all_retrieved_save_tensor, os.path.join(save_path, "all_retrieved.pt"))
-        print("all_recons_save_tensor.shape: ", all_recons_save_tensor.shape)
         print("all_clipvoxels_save_tensor.shape: ", all_clipvoxels_save_tensor.shape)
         print("all_ground_truth_save_tensor.shape: ", all_ground_truth_save_tensor.shape)
-        print("all_retrieved_save_tensor.shape: ", all_retrieved_save_tensor.shape)
-        print("All tensors saved successfully on ", save_path)
-    
+        if do_cpd:
+            torch.save(torch.tensor(all_cpd_save), os.path.join(save_path, "all_cpd.pt"))
+
+        # heavy derived outputs: only persisted when produced AND save_all_recons is on
+        if save_all_recons and run_recons:
+            all_recons_save_tensor = torch.tensor(all_recons_save).permute(0,3,1,2)
+            torch.save(all_recons_save_tensor, os.path.join(save_path, "all_recons.pt"))
+            print("all_recons_save_tensor.shape: ", all_recons_save_tensor.shape)
+        if save_all_recons and do_retrieval:
+            all_retrieved_save_tensor = torch.stack([torch.tensor(np.array(item)) for item in all_retrieved_save], dim=0)
+            torch.save(all_retrieved_save_tensor, os.path.join(save_path, "all_retrieved.pt"))
+            print("all_retrieved_save_tensor.shape: ", all_retrieved_save_tensor.shape)
+        print("Tensors saved successfully on ", save_path)
+
+    # accumulate this run's results into the session-level lists for end-of-session eval
+    session_cpd.extend(all_cpd_save)
+    session_clipvoxels.extend(all_clipvoxels_save)
+    session_ground_truth.extend(all_ground_truth_save)
+    session_recons.extend(all_recons_save)
+    session_retrieved.extend(all_retrieved_save)
+
     bidsInterface.closeStream(streamID)
 
 
 print('all done!')
-if evaluate_session:
-    # Run evaluation metrics
-    from utils_mindeye import calculate_retrieval_metrics, calculate_alexnet, calculate_clip, calculate_swav, calculate_efficientnet_b1, calculate_inception_v3, calculate_pixcorr, calculate_ssim, deduplicate_tensors
-    all_recons_save_tensor = []
-    all_clipvoxels_save_tensor = []
-    all_ground_truth_save_tensor = []
-    all_retrieved_save_tensor = []
+# ---- end-of-session evaluation (always runs; adapts to the enabled options) ----
+from utils_mindeye import (calculate_retrieval_metrics, calculate_alexnet, calculate_clip,
+                           calculate_swav, calculate_efficientnet_b1, calculate_inception_v3,
+                           calculate_pixcorr, calculate_ssim, deduplicate_tensors)
 
-    for run_num in range(n_runs):
-        save_path = f"{output_path}/sub-005_ses-03_task-C_run-{run_num+1:02d}_recons"
+metrics = {}
 
-        try:
-            # recons = torch.load(os.path.join(save_path, "all_recons.pt")).to(torch.float16)
-            # clipvoxels = torch.load(os.path.join(save_path, "all_clipvoxels.pt")).to(torch.float16)
-            # ground_truth = torch.load(os.path.join(save_path, "all_ground_truth.pt")).to(torch.float16)
-            recons = torch.load(os.path.join(save_path, "all_recons.pt")).to(torch.float16).to(device)
-            clipvoxels = torch.load(os.path.join(save_path, "all_clipvoxels.pt")).to(torch.float16).to(device)
-            ground_truth = torch.load(os.path.join(save_path, "all_ground_truth.pt")).to(torch.float16).to(device)
+# CPD + pairmate 2-AFC (a 2-AFC trial is correct <=> CPD > 0 for L2-normalized embeddings,
+# equivalent to cpd_analysis.pairmate_2afc_accuracy)
+if do_cpd and len(session_cpd) > 0:
+    cpd_arr = np.array(session_cpd, dtype=np.float32)
+    metrics["meanCPD"] = float(cpd_arr.mean())
+    metrics["pairmate_2afc"] = float((cpd_arr > 0).mean())
+    print(f"meanCPD={metrics['meanCPD']:+.4f}  pairmate_2afc={metrics['pairmate_2afc']:.3f}  (n={len(cpd_arr)})")
 
-            all_recons_save_tensor.append(recons)
-            all_clipvoxels_save_tensor.append(clipvoxels)
-            all_ground_truth_save_tensor.append(ground_truth)
-        except FileNotFoundError:
-            print("Error: Tensors not found. Please check the save path.")
-
-    # Concatenate tensors along the first dimension
+# forward/backward retrieval from predicted CLIP embeddings (needs repeated images)
+if do_retrieval and len(session_clipvoxels) > 0:
     try:
-        all_recons_save_tensor = torch.cat(all_recons_save_tensor, dim=0)
-        all_clipvoxels_save_tensor = torch.cat(all_clipvoxels_save_tensor, dim=0)
-        all_ground_truth_save_tensor = torch.cat(all_ground_truth_save_tensor, dim=0)
-    except RuntimeError:
-        print('Error: Couldn\'t concatenate tensors')
+        clipvoxels_t = torch.stack([torch.as_tensor(np.array(c)) for c in session_clipvoxels]).to(torch.float16).to(device)
+        ground_truth_t = torch.stack([torch.as_tensor(np.array(g)) for g in session_ground_truth]).to(torch.float16).to(device)
+        with torch.autocast(device_type="cuda", dtype=torch.float16):
+            _, _, duplicated = deduplicate_tensors(clipvoxels_t, ground_truth_t)
+            dup = np.array(duplicated)
+            metrics["fwd_retrieval_subset0"], metrics["bwd_retrieval_subset0"] = \
+                calculate_retrieval_metrics(clipvoxels_t[dup[:, 0]], ground_truth_t[dup[:, 0]])
+            metrics["fwd_retrieval_subset1"], metrics["bwd_retrieval_subset1"] = \
+                calculate_retrieval_metrics(clipvoxels_t[dup[:, 1]], ground_truth_t[dup[:, 1]])
+    except Exception as e:
+        print(f"retrieval eval skipped: {e}")
 
-    with torch.autocast(device_type="cuda", dtype=torch.float16):
-        unique_clip_voxels, unique_ground_truth, duplicated = deduplicate_tensors(all_clipvoxels_save_tensor, all_ground_truth_save_tensor)
-        
-        print('calculating retrieval subset 0 (first set of repeats)')
-        unique_clip_voxels_subset0 = all_clipvoxels_save_tensor[np.array(duplicated)[:,0]]
-        unique_ground_truth_subset0 = all_ground_truth_save_tensor[np.array(duplicated)[:,0]]
-        all_fwd_acc_subset0, all_bwd_acc_subset0 = calculate_retrieval_metrics(unique_clip_voxels_subset0, unique_ground_truth_subset0)
+# reconstruction-quality metrics (only when reconstructions were generated)
+if run_recons and len(session_recons) > 0:
+    try:
+        recons_t = torch.tensor(np.array(session_recons)).permute(0, 3, 1, 2).to(torch.float16).to(device)
+        ground_truth_t = torch.stack([torch.as_tensor(np.array(g)) for g in session_ground_truth]).to(torch.float16).to(device)
+        with torch.autocast(device_type="cuda", dtype=torch.float16):
+            metrics["pixcorr"] = calculate_pixcorr(recons_t, ground_truth_t)
+            metrics["ssim"] = calculate_ssim(recons_t, ground_truth_t)
+            metrics["alexnet2"], metrics["alexnet5"] = calculate_alexnet(recons_t, ground_truth_t)
+            metrics["inception"] = calculate_inception_v3(recons_t, ground_truth_t)
+            metrics["clip_"] = calculate_clip(recons_t, ground_truth_t)
+            metrics["efficientnet"] = calculate_efficientnet_b1(recons_t, ground_truth_t)
+            metrics["swav"] = calculate_swav(recons_t, ground_truth_t)
+    except Exception as e:
+        print(f"reconstruction eval skipped: {e}")
 
-        print('calculating retrieval subset 1 (second set of repeats)')
-        unique_clip_voxels_subset1 = all_clipvoxels_save_tensor[np.array(duplicated)[:,1]]
-        unique_ground_truth_subset1 = all_ground_truth_save_tensor[np.array(duplicated)[:,1]]
-        all_fwd_acc_subset1, all_bwd_acc_subset1 = calculate_retrieval_metrics(unique_clip_voxels_subset1, unique_ground_truth_subset1)
-        pixcorr = calculate_pixcorr(all_recons_save_tensor, all_ground_truth_save_tensor)
-        ssim_ = calculate_ssim(all_recons_save_tensor, all_ground_truth_save_tensor)
-        alexnet2, alexnet5 = calculate_alexnet(all_recons_save_tensor, all_ground_truth_save_tensor)
-        inception = calculate_inception_v3(all_recons_save_tensor, all_ground_truth_save_tensor)
-        clip_ = calculate_clip(all_recons_save_tensor, all_ground_truth_save_tensor)
-        efficientnet = calculate_efficientnet_b1(all_recons_save_tensor, all_ground_truth_save_tensor)
-        swav = calculate_swav(all_recons_save_tensor, all_ground_truth_save_tensor)
-
-
-    # save the results to a csv file
-    df_metrics = pd.DataFrame({
-        "Metric": [
-            "alexnet2",
-            "alexnet5",
-            "inception",
-            "clip_",
-            "efficientnet",
-            "swav",
-            "pixcorr",
-            "ssim",
-            "all_fwd_acc_subset0",
-            "all_bwd_acc_subset0",
-            "all_fwd_acc_subset1",
-            "all_bwd_acc_subset1"
-        ],
-        "Value": [
-            alexnet2,
-            alexnet5,
-            inception,
-            clip_,
-            efficientnet,
-            swav,
-            pixcorr,
-            ssim_,
-            all_fwd_acc_subset0,
-            all_bwd_acc_subset0,
-            all_fwd_acc_subset1,
-            all_bwd_acc_subset1
-        ]
-    })
-
-    percentage_metrics = ["alexnet2", "alexnet5", "inception", "clip_", "retrieval"]
-    lower_better_metrics = ["efficientnet", "swav"]
-    higher_better_arrow = "↑"
-    lower_better_arrow = "↓"
-
-    # Format function
-    def format_metric(metric, value):
-        if metric in percentage_metrics:
-            return f"{value * 100:.2f}% {higher_better_arrow}"
-        elif metric in lower_better_metrics:
-            return f"{value:.2f} {lower_better_arrow}"
-        else:
-            return f"{value:.2f} {higher_better_arrow}"
-
-    # Apply formatting
-    df_formatted = df_metrics.copy()
-    df_formatted["Formatted"] = df_formatted.apply(lambda row: format_metric(row["Metric"], row["Value"]), axis=1)
-    df_formatted.set_index("Metric", inplace=True)
-    df_formatted.index.name = "Metric"
-
-    # Print and save
-    print(df_formatted[["Formatted"]])
-
-    # df_formatted[["Formatted"]].to_csv(os.path.join(save_path, "metrics.csv"))
+# print + save whatever was computed
+if metrics:
+    df_metrics = pd.DataFrame({"Metric": list(metrics.keys()),
+                               "Value": [float(v) for v in metrics.values()]})
+    print(df_metrics.to_string(index=False))
+    df_metrics.to_csv(os.path.join(output_path, f"{sub}_{session}_metrics.csv"), index=False)
+else:
+    print("no evaluation metrics computed for the enabled options")

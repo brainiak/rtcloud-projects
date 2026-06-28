@@ -90,15 +90,15 @@ def assert_pairmate_inputs(mst_pairs, image_idx, vox, images, vox_image_names=No
 
 def evaluate_mst_pairs(mst_pairs, *, vox, images, image_idx, model,
                        clip_img_embedder, device, data_type=torch.float16,
-                       vox_image_names=None, check_inputs=True):
+                       vox_image_names=None):
     """Pairmate 2-AFC accuracy.
 
     For each pairmate (A, B): score +1 if the brain decode of A's voxel is
     cosine-closer to image A than image B, and +1 if B's voxel is closer to B
     than A. Returns score / total over all comparisons.
     """
-    if check_inputs:
-        assert_pairmate_inputs(mst_pairs, image_idx, vox, images, vox_image_names)
+
+    assert_pairmate_inputs(mst_pairs, image_idx, vox, images, vox_image_names)
 
     score = 0
     total = 0
